@@ -156,6 +156,29 @@ body.pdf-exporting .tabs,
 body.pdf-exporting .config,
 body.pdf-exporting details.filelog-wrap{ display:none !important; }
 body.pdf-exporting .wrap{ max-width:100%; }
+
+/* PDF 전용 2페이지 레이아웃 */
+.pdf-stage{
+  position:absolute; left:-20000px; top:0; width:1400px;
+  background:#fff; color:#000; font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+.pdf-sheet{ width:1400px; background:#fff; padding:32px 38px; }
+.pdf-sheet-title{ margin:0 0 16px; padding-bottom:12px; border-bottom:2px solid #222; }
+.pdf-sheet-title h2{ margin:0 0 4px; font-size:30px; letter-spacing:-0.02em; }
+.pdf-sheet-title p{ margin:0; color:#555; font-size:15px; }
+.pdf-graph-sheet .status-line{ margin-bottom:12px; color:#333; }
+.pdf-graph-sheet .chart-card{ box-shadow:none; border:1px solid #777; padding:15px 18px 11px; gap:5px; }
+.pdf-graph-sheet .chart-card.main svg{ height:340px !important; }
+.pdf-graph-sheet .mini-grid{ grid-template-columns:repeat(3,1fr) !important; gap:14px; }
+.pdf-graph-sheet .mini-grid .chart-card svg{ height:215px !important; }
+.pdf-graph-sheet .hint{ font-size:12px; }
+.pdf-data-sheet .table-scroll{ overflow:visible; box-shadow:none; border:1px solid #555; }
+.pdf-data-sheet table{ min-width:0; table-layout:fixed; }
+.pdf-data-sheet thead th{ font-size:11px; padding:8px 6px; border-bottom:2px solid #555; }
+.pdf-data-sheet tbody td{ font-size:12px; padding:6px; }
+.pdf-data-sheet thead th:first-child{ width:17%; }
+.pdf-data-sheet .table-caption{ margin-top:8px; color:#555; font-size:11px; }
+
 </style>
 
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -740,126 +763,70 @@ async function exportPDF(){
   btn.disabled = true;
   btn.textContent = '생성 중…';
   const prevTheme = document.documentElement.getAttribute('data-theme');
-  document.documentElement.setAttribute('data-theme', 'light'); // PDF는 항상 밝은 테마로 고정(가독성 확보)
+  document.documentElement.setAttribute('data-theme', 'light');
   document.body.classList.add('pdf-exporting');
-  await new Promise(r=>setTimeout(r, 60)); // 레이아웃 반영 대기
+  await new Promise(r=>setTimeout(r,80));
 
+  let stage = null;
   try{
     if(typeof html2canvas==='undefined' || typeof window.jspdf==='undefined'){
       throw new Error('PDF 라이브러리를 불러오지 못했습니다.');
     }
-    const target = document.querySelector('.wrap');
-    const scale = 4;
 
-    // 페이지를 나눌 때 표의 한 행(또는 카드)이 중간에 잘리지 않도록,
-    // 잘라도 되는 요소들의 위치(픽셀, canvas 좌표계)를 미리 측정해둔다.
-    const targetRect = target.getBoundingClientRect();
-    const protectedZones = [];
-    target.querySelectorAll('table tr, .card').forEach(el=>{
-      const r = el.getBoundingClientRect();
-      const top = (r.top - targetRect.top) * scale;
-      const bottom = (r.bottom - targetRect.top) * scale;
-      if(bottom > top) protectedZones.push([top, bottom]);
-    });
-    protectedZones.sort((a,b)=>a[0]-b[0]);
-    function adjustBreak(pos, minStart){
-      for(const [top, bottom] of protectedZones){
-        if(pos > top + 0.5 && pos < bottom - 0.5){
-          // 이 지점에서 자르면 요소가 반으로 잘림 -> 그 요소 시작 지점으로 당겨서
-          // 요소 전체를 다음 페이지로 넘긴다 (단, 한 페이지 분량보다 큰 요소는 어쩔 수 없이 그대로 자름)
-          return top > minStart ? top : pos;
-        }
-      }
-      return pos;
+    stage = document.createElement('div');
+    stage.className = 'pdf-stage';
+
+    const graphPage = document.createElement('section');
+    graphPage.className = 'pdf-sheet pdf-graph-sheet';
+    graphPage.innerHTML =
+      '<div class="pdf-sheet-title"><h2>전력 모니터링 · 그래프</h2>'+
+      '<p>회차별 전력 안정성 및 전기적 특성 변화</p></div>';
+
+    const statusLine = document.querySelector('#statusArea .status-line');
+    if(statusLine) graphPage.appendChild(statusLine.cloneNode(true));
+    graphPage.appendChild(document.querySelector('.chart-card.main').cloneNode(true));
+    graphPage.appendChild(document.getElementById('miniGrid').cloneNode(true));
+
+    const dataPage = document.createElement('section');
+    dataPage.className = 'pdf-sheet pdf-data-sheet';
+    dataPage.innerHTML =
+      '<div class="pdf-sheet-title"><h2>전력 모니터링 · 측정 데이터</h2>'+
+      '<p>CSV 파일별 계산 결과</p></div>';
+    dataPage.appendChild(document.querySelector('.table-scroll').cloneNode(true));
+    dataPage.appendChild(document.querySelector('.table-caption').cloneNode(true));
+
+    stage.appendChild(graphPage);
+    stage.appendChild(dataPage);
+    document.body.appendChild(stage);
+    await new Promise(r=>setTimeout(r,80));
+
+    const captureOptions = {scale:2, backgroundColor:'#ffffff', useCORS:true, logging:false};
+    const graphCanvas = await html2canvas(graphPage, captureOptions);
+    const dataCanvas = await html2canvas(dataPage, captureOptions);
+
+    const {jsPDF} = window.jspdf;
+    const pageW = 297, pageH = 210, margin = 7;
+    const maxW = pageW-margin*2, maxH = pageH-margin*2;
+    const doc = new jsPDF({unit:'mm', format:'a4', orientation:'landscape'});
+
+    function addCanvas(canvas, addPage){
+      if(addPage) doc.addPage('a4','landscape');
+      const ratio = Math.min(maxW/canvas.width, maxH/canvas.height);
+      const drawW = canvas.width*ratio;
+      const drawH = canvas.height*ratio;
+      const x = (pageW-drawW)/2;
+      const y = margin;
+      doc.addImage(canvas.toDataURL('image/jpeg',0.98),'JPEG',x,y,drawW,drawH);
     }
 
-    // 표가 페이지 경계에서 이어질 때, 이어지는 페이지 맨 위에 헤더 행을 다시 그려준다.
-    let tableTop = null, tableBottom = null, theadTop = null, theadBottom = null, tableLeft = null, tableRight = null;
-    const tableWrapEl = target.querySelector('.table-scroll');
-    const tableEl = target.querySelector('table');
-    const theadEl = tableEl ? tableEl.querySelector('thead') : null;
-    if(tableWrapEl && tableEl && theadEl){
-      const wr = tableWrapEl.getBoundingClientRect();
-      const hr = theadEl.getBoundingClientRect();
-      tableTop = (wr.top - targetRect.top) * scale;
-      tableBottom = (wr.bottom - targetRect.top) * scale;
-      tableLeft = (wr.left - targetRect.left) * scale;
-      tableRight = (wr.right - targetRect.left) * scale;
-      theadTop = (hr.top - targetRect.top) * scale;
-      theadBottom = (hr.bottom - targetRect.top) * scale;
-    }
-    const headerHeightPx = (theadTop!==null) ? (theadBottom - theadTop) : 0;
-    // 표 테두리와 같은 색/굵기로 페이지가 잘리는 자리에도 테두리를 그려준다 (카드류와 통일감 유지).
-    const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-strong').trim() || 'rgba(11,11,11,0.55)';
-    const borderPx = Math.max(1, Math.round(scale));
-
-    const canvas = await html2canvas(target, {scale, backgroundColor:'#ffffff', useCORS:true});
-
-    const { jsPDF } = window.jspdf;
-    const pageW = 210, pageH = 297, marginMM = 8; // A4, mm
-    const imgW = pageW - marginMM*2;
-    const pxPerMM = canvas.width / imgW;
-    const pageUsablePx = Math.floor((pageH - marginMM*2) * pxPerMM);
-
-    const doc = new jsPDF({unit:'mm', format:'a4'});
-    let renderedPx = 0, first = true;
-    while(renderedPx < canvas.height){
-      // 이 페이지가 표 중간(헤더 이후)에서 시작하면, 헤더를 다시 그려줄 자리를 위쪽에 남겨둔다.
-      const repeatHeader = headerHeightPx>0 && renderedPx > theadBottom + 0.5 && renderedPx < tableBottom - 0.5;
-      const bodyBudget = repeatHeader ? Math.max(1, pageUsablePx - headerHeightPx) : pageUsablePx;
-
-      let sliceEnd = Math.min(renderedPx + bodyBudget, canvas.height);
-      if(sliceEnd < canvas.height) sliceEnd = adjustBreak(sliceEnd, renderedPx);
-      const sliceH = sliceEnd - renderedPx;
-
-      const pageCanvas = document.createElement('canvas');
-      pageCanvas.width = canvas.width;
-      pageCanvas.height = sliceH + (repeatHeader ? headerHeightPx : 0);
-      const pctx = pageCanvas.getContext('2d');
-      pctx.fillStyle = '#ffffff';
-      pctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
-      let yOffset = 0;
-      if(repeatHeader){
-        pctx.drawImage(canvas, 0, theadTop, canvas.width, headerHeightPx, 0, 0, canvas.width, headerHeightPx);
-        yOffset = headerHeightPx;
-      }
-      pctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceH, 0, yOffset, canvas.width, sliceH);
-
-      // 표가 이 페이지 경계에서 잘리면, 잘린 자리에도 같은 굵기/색의 테두리를 그려서
-      // 카드·표 다른 곳과 통일된 프레임처럼 보이게 한다.
-      if(tableLeft!==null){
-        pctx.strokeStyle = borderColor;
-        pctx.lineWidth = borderPx;
-        const halfLine = borderPx/2;
-        if(repeatHeader){
-          // 이어지는 헤더 블록 위쪽을 닫아준다.
-          pctx.beginPath();
-          pctx.moveTo(tableLeft, halfLine);
-          pctx.lineTo(tableRight, halfLine);
-          pctx.stroke();
-        }
-        if(tableBottom!==null && sliceEnd < tableBottom - 0.5 && renderedPx < tableBottom){
-          // 표가 다음 페이지로 계속 이어지면, 이 페이지 맨 아래를 닫아준다.
-          const closeY = pageCanvas.height - halfLine;
-          pctx.beginPath();
-          pctx.moveTo(tableLeft, closeY);
-          pctx.lineTo(tableRight, closeY);
-          pctx.stroke();
-        }
-      }
-
-      if(!first) doc.addPage();
-      doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginMM, marginMM, imgW, pageCanvas.height/pxPerMM);
-      renderedPx += sliceH;
-      first = false;
-    }
+    addCanvas(graphCanvas,false);
+    addCanvas(dataCanvas,true);
 
     const blob = doc.output('blob');
     const ts = new Date();
     const p2 = n=>String(n).padStart(2,'0');
-    const filename = `run_monitor_${ts.getFullYear()}${p2(ts.getMonth()+1)}${p2(ts.getDate())}_${p2(ts.getHours())}${p2(ts.getMinutes())}.pdf`;
-
-    // 일반 웹페이지용 표준 브라우저 다운로드 (로그인/권한 불필요)
+    const filename = 'run_monitor_'+ts.getFullYear()+p2(ts.getMonth()+1)+p2(ts.getDate())+
+      '_'+p2(ts.getHours())+p2(ts.getMinutes())+'.pdf';
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = blobUrl;
@@ -867,16 +834,17 @@ async function exportPDF(){
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(()=>URL.revokeObjectURL(blobUrl), 2000);
+    setTimeout(()=>URL.revokeObjectURL(blobUrl),2000);
     btn.textContent = '저장 완료 ✓';
   }catch(err){
-    console.error('PDF export failed', err);
+    console.error('PDF export failed',err);
     btn.textContent = '저장 실패';
   }finally{
+    if(stage) stage.remove();
     document.body.classList.remove('pdf-exporting');
     if(prevTheme===null) document.documentElement.removeAttribute('data-theme');
-    else document.documentElement.setAttribute('data-theme', prevTheme);
-    setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 1800);
+    else document.documentElement.setAttribute('data-theme',prevTheme);
+    setTimeout(()=>{ btn.textContent=originalText; btn.disabled=false; },1800);
   }
 }
 document.getElementById('pdfBtn').addEventListener('click', exportPDF);

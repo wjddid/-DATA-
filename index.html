@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>전력 모니터링</title>
+</head>
+<body>
+<style>
+:root{
+  --bg:#f9f9f7; --surface:#fcfcfb; --surface-2:#f2f1ec; --border:rgba(11,11,11,0.10); --border-strong:rgba(11,11,11,0.55);
+  --text:#0b0b0b; --text-2:#52514e; --muted:#898781; --grid:#e1e0d9; --axis:#c3c2b7;
+  --run1:#2a78d6; --run2:#eb6834; --run3:#1baf7a;
+  --good:#0ca30c; --warn:#c98500; --crit:#d03b3b; --crit-bg:#fbeceb; --warn-bg:#fbf2e2;
+  --shadow: 0 1px 2px rgba(11,11,11,0.06), 0 8px 24px rgba(11,11,11,0.04);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d0d0d; --surface:#1a1a19; --surface-2:#212120; --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.45);
+    --text:#ffffff; --text-2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+    --run1:#3987e5; --run2:#d95926; --run3:#199e70;
+    --good:#0ca30c; --warn:#c98500; --crit:#e66767; --crit-bg:#3a1f1f; --warn-bg:#332a17;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d0d0d; --surface:#1a1a19; --surface-2:#212120; --border:rgba(255,255,255,0.10); --border-strong:rgba(255,255,255,0.45);
+  --text:#ffffff; --text-2:#c3c2b7; --muted:#898781; --grid:#2c2c2a; --axis:#383835;
+  --run1:#3987e5; --run2:#d95926; --run3:#199e70;
+  --good:#0ca30c; --warn:#c98500; --crit:#e66767; --crit-bg:#3a1f1f; --warn-bg:#332a17;
+  --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.25);
+  color-scheme: dark;
+}
+*{box-sizing:border-box;}
+body{ margin:0; background:var(--bg); color:var(--text); font-family:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; padding-inline:16px; }
+.num{ font-family:"IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.wrap{ max-width:1120px; margin:0 auto; padding-block:24px 60px; display:flex; flex-direction:column; gap:20px; }
+
+header.page{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:14px; border-bottom:1px solid var(--border); padding-bottom:18px; }
+header.page .titles{ display:flex; flex-direction:column; gap:3px; }
+.eyebrow{ font-size:0.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; }
+header.page h1{ margin:0; font-size:1.45rem; font-weight:700; letter-spacing:-0.01em; }
+header.page .sub{ margin:0; color:var(--text-2); font-size:0.86rem; }
+.toolbar{ display:flex; flex-wrap:wrap; gap:8px; }
+.btn{ appearance:none; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:0.82rem; font-weight:500; padding:8px 14px; border-radius:8px; cursor:pointer; white-space:nowrap; }
+.btn:hover{ background:var(--surface-2); }
+.btn.run1{ border-color:color-mix(in srgb, var(--run1) 50%, var(--border)); color:var(--run1); }
+.btn.run2{ border-color:color-mix(in srgb, var(--run2) 50%, var(--border)); color:var(--run2); }
+.btn.run3{ border-color:color-mix(in srgb, var(--run3) 50%, var(--border)); color:var(--run3); }
+.btn.primary{ background:var(--text); color:var(--bg); border-color:var(--text); }
+.btn.ghost{ background:transparent; }
+
+.card{ background:var(--surface); border:1px solid var(--border-strong); border-radius:12px; box-shadow:var(--shadow); }
+
+/* tabs */
+.tabs{ display:flex; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:4px; width:fit-content; }
+.tabs button{ appearance:none; border:none; background:transparent; color:var(--text-2); font:inherit; font-size:0.82rem; font-weight:500; padding:7px 14px; border-radius:7px; cursor:pointer; }
+.tabs button.active{ background:var(--surface); color:var(--text); box-shadow:var(--shadow); }
+
+/* config row */
+.config{ display:flex; flex-wrap:wrap; gap:16px 28px; align-items:flex-end; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+.field{ display:flex; flex-direction:column; gap:5px; }
+.field label{ font-size:0.72rem; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+.field select, .field input{ font:inherit; font-size:0.86rem; padding:7px 9px; border-radius:7px; border:1px solid var(--border); background:var(--bg); color:var(--text); width:132px; }
+.field input::placeholder{ color:var(--muted); }
+.region-explain{ margin-top:-6px; display:flex; flex-direction:column; gap:4px; font-size:0.78rem; color:var(--text-2); line-height:1.55; }
+.region-explain b{ color:var(--text); }
+
+/* status / legend */
+.status-line{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; font-size:0.82rem; color:var(--text-2); }
+.legend-toggle{ display:flex; gap:12px; flex-wrap:wrap; }
+.legend-item{ display:flex; align-items:center; gap:6px; cursor:pointer; font-size:0.82rem; font-weight:600; padding:3px 4px; border-radius:6px; user-select:none; }
+.legend-item .sw{ width:16px; height:3px; border-radius:2px; display:inline-block; }
+.legend-item.off{ opacity:0.35; }
+.filelog{ font-size:0.76rem; color:var(--muted); line-height:1.7; }
+.filelog b{ color:var(--text-2); }
+details.filelog-wrap summary{ cursor:pointer; font-size:0.8rem; color:var(--text-2); }
+
+/* summary cards */
+.summary-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(190px,1fr)); gap:12px; }
+.summary-card{ padding:14px 16px; display:flex; flex-direction:column; gap:6px; border-left:3px solid var(--run-color, var(--border)); }
+.summary-card .label{ font-size:0.76rem; color:var(--muted); display:flex; justify-content:space-between; }
+.summary-card .value{ font-size:1.5rem; font-weight:700; }
+.summary-card .delta{ font-size:0.78rem; color:var(--text-2); display:flex; gap:10px; }
+.summary-card .delta .neg{ color:var(--crit); }
+.summary-card .delta .pos{ color:var(--good); }
+.summary-card .minmax{ font-size:0.76rem; color:var(--text-2); display:flex; flex-direction:column; gap:3px; border-top:1px solid var(--border); padding-top:7px; margin-top:1px; }
+.summary-card .minmax .mm-file{ color:var(--muted); font-weight:500; }
+
+/* charts */
+.chart-card{ padding:18px 20px 14px; display:flex; flex-direction:column; gap:8px; }
+.chart-card .ch-title{ display:flex; justify-content:space-between; align-items:baseline; }
+.chart-card .ch-title h3{ margin:0; font-size:1rem; font-weight:700; }
+.chart-card .ch-title .unit{ font-size:0.8rem; color:var(--text-2); font-weight:600; }
+.chart-card.main svg{ height:280px; }
+.chart-card svg{ display:block; width:100%; overflow:visible; }
+.mini-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+.mini-grid .chart-card svg{ height:190px; }
+.gridline{ stroke:var(--text-2); stroke-width:1; opacity:0.45; }
+.axisline{ stroke:var(--text-2); stroke-width:1.2; }
+.axislabel{ fill:var(--text-2); font-size:10.5px; font-weight:600; font-family:"IBM Plex Mono",monospace; }
+.pinned-label{ fill:var(--text); font-size:9.5px; font-family:"IBM Plex Mono",monospace; font-weight:600; }
+.hint{ font-size:0.72rem; color:var(--muted); }
+
+.tooltip{ position:fixed; pointer-events:none; background:var(--surface); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow); padding:7px 10px; font-size:0.76rem; color:var(--text); z-index:50; display:none; line-height:1.5; white-space:nowrap; }
+.tooltip .row{ display:flex; gap:8px; align-items:center; }
+.tooltip .sw{ width:8px; height:8px; border-radius:2px; display:inline-block; }
+
+/* table */
+.table-scroll{ overflow-x:auto; overflow-y:hidden; border-radius:12px; border:1px solid var(--border-strong); background:var(--surface); }
+table{ width:100%; border-collapse:collapse; min-width:960px; background:transparent; }
+thead th{ text-align:right; font-size:0.8rem; text-transform:uppercase; letter-spacing:.03em; color:var(--text); font-weight:700; padding:13px 14px; border-bottom:2px solid var(--border-strong); white-space:nowrap; background:var(--surface-2); }
+thead th:first-child, thead th:nth-child(2){ text-align:left; }
+tbody td{ text-align:right; padding:11px 14px; font-size:0.95rem; font-weight:500; color:var(--text); border-bottom:1px solid var(--border); white-space:nowrap; }
+tbody td:first-child, tbody td:nth-child(2){ text-align:left; }
+tbody tr:nth-child(even){ background:var(--surface-2); }
+tbody tr:last-child td{ border-bottom:none; }
+tbody tr:hover td{ background:color-mix(in srgb, var(--run1) 10%, transparent); }
+.run-chip{ display:inline-flex; align-items:center; gap:6px; font-weight:700; font-size:0.82rem; color:var(--text); }
+.run-chip .dot{ width:9px; height:9px; border-radius:50%; box-shadow:0 0 0 1px var(--border-strong); }
+.flag{ display:inline-flex; align-items:center; gap:4px; font-size:0.74rem; font-weight:600; padding:2px 7px; border-radius:100px; }
+.flag.warn{ background:var(--warn-bg); color:var(--warn); }
+.flag.crit{ background:var(--crit-bg); color:var(--crit); }
+.flag.ok{ color:var(--muted); }
+.table-caption{ font-size:0.74rem; color:var(--muted); display:flex; justify-content:space-between; padding:4px 2px; }
+
+.empty-state{ display:flex; flex-direction:column; align-items:center; gap:10px; padding:50px 20px; color:var(--muted); text-align:center; font-size:0.9rem; }
+.empty-state b{ color:var(--text-2); }
+
+footer.note{ color:var(--muted); font-size:0.76rem; line-height:1.7; border-top:1px solid var(--border); padding-top:16px; }
+
+input[type=file]{ display:none; }
+
+@media (max-width:720px){
+  .summary-grid{ grid-template-columns:1fr 1fr; }
+  header.page{ flex-direction:column; }
+  .config{ flex-direction:column; align-items:stretch; }
+  .field select, .field input{ width:100%; }
+  .mini-grid{ grid-template-columns:repeat(2, 1fr); }
+}
+@media (max-width:460px){
+  .mini-grid{ grid-template-columns:1fr; }
+}
+
+@media print{
+  .toolbar, .tabs, .config, details.filelog-wrap, .empty-state button{ display:none !important; }
+  body{ background:#fff; color:#000; }
+  .card{ box-shadow:none; border:1px solid #ccc; break-inside:avoid; }
+  .wrap{ max-width:100%; }
+}
+
+body.pdf-exporting .toolbar,
+body.pdf-exporting .tabs,
+body.pdf-exporting .config,
+body.pdf-exporting details.filelog-wrap{ display:none !important; }
+body.pdf-exporting .wrap{ max-width:100%; }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<div class="wrap">
+  <header class="page">
+    <div class="titles">
+      <span class="eyebrow">Waveform Lab · Run Monitor</span>
+      <h1>전력 모니터링</h1>
+      <p class="sub">회차별로 저장한 오실로스코프 CSV를 불러와 같은 경과시간끼리 비교합니다. 파일명은 <span class="num">회차-경과분.csv</span> 형식(예: 1-5.csv)을 인식합니다.</p>
+    </div>
+    <div class="toolbar">
+      <button class="btn run1" id="openRun1">1회차 파일 열기</button>
+      <button class="btn run2" id="openRun2">2회차 파일 열기</button>
+      <button class="btn run3" id="openRun3">3회차 파일 열기</button>
+      <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
+      <button class="btn primary" id="pdfBtn">PDF 저장</button>
+      <input type="file" id="fileInput1" multiple accept=".csv">
+      <input type="file" id="fileInput2" multiple accept=".csv">
+      <input type="file" id="fileInput3" multiple accept=".csv">
+    </div>
+  </header>
+
+  <div class="tabs" id="tabBar">
+    <button data-tab="all" class="active">전체 비교</button>
+    <button data-tab="1">1회차</button>
+    <button data-tab="2">2회차</button>
+    <button data-tab="3">3회차</button>
+  </div>
+
+  <div class="config">
+    <div class="field">
+      <label>계산 구간</label>
+      <select id="regionMode">
+        <option value="whole">완전한 주기</option>
+        <option value="full">전체 기록</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>계획 시간 (분)</label>
+      <input type="number" id="planMinutes" value="60" min="1" step="1">
+    </div>
+  </div>
+  <div class="region-explain">
+    <div><b>전체 기록</b> — 파일에 저장된 파형 데이터(약 10,000개 포인트) 전체를 그대로 사용해 계산합니다.</div>
+    <div><b>완전한 주기</b> — 추정 주파수를 기준으로 앞부분부터 정수 개 사이클만 남기고, 끝에 어중간하게 걸치는 자투리 구간은 잘라낸 뒤 계산합니다. 값이 더 안정적이라 보통 이쪽을 권장합니다.</div>
+  </div>
+
+  <div id="statusArea"></div>
+
+  <div id="emptyState" class="card empty-state">
+    <div><b>아직 불러온 파일이 없습니다.</b><br>위의 [1회차 파일 열기] 버튼부터 눌러서 CSV를 선택해주세요 (여러 개 한번에 선택 가능).</div>
+  </div>
+
+  <div id="mainContent" style="display:none; flex-direction:column; gap:20px;">
+    <div class="summary-grid" id="summaryGrid"></div>
+
+    <div class="card chart-card main">
+      <div class="ch-title"><h3>유효전력 P · 시간별 변화</h3><span class="unit">W</span></div>
+      <svg id="mainChart" viewBox="0 0 900 280" preserveAspectRatio="none"></svg>
+      <div class="hint">점: 실제 저장 시점 · 실선: 연속 구간 · 점선: 파일 없음(보간) · 점 클릭: 수치 고정</div>
+    </div>
+
+    <div class="mini-grid" id="miniGrid"></div>
+
+    <div class="table-scroll">
+      <table id="dataTable"></table>
+    </div>
+    <div class="table-caption">
+      <span>처음 대비 / 직전 대비는 같은 회차 안에서의 변화율(%)입니다.</span>
+      <span id="tableCount"></span>
+    </div>
+  </div>
+
+  <footer class="note">
+    P는 같은 시점의 전압×전류를 먼저 곱한 뒤 평균(mean(v·i))한 유효전력입니다. Vrms/Irms는 구간 전체의 실효값, 위상은 추정 주파수에서의 동기검출로 구합니다.
+    "완전한 주기"를 선택하면 각 파일의 기록 시작점부터 정수 개 사이클만 남기고 계산합니다. PF와 위상차는 완전히 같은 정보가 아니라서(파형이 왜곡되면 PF ≠ cos(위상차)) 둘 다 표시합니다.
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+'use strict';
+const RUN_COLORS = {1:'var(--run1)', 2:'var(--run2)', 3:'var(--run3)'};
+const state = {
+  runs: {1:{files:{}, visible:true}, 2:{files:{}, visible:true}, 3:{files:{}, visible:true}},
+  config: {region:'whole', planMinutes:60},
+  activeTab: 'all',
+  pinned: null,
+};
+
+const tooltip = document.getElementById('tooltip');
+function showTip(x,y,html){ tooltip.innerHTML = html; tooltip.style.left=(x+14)+'px'; tooltip.style.top=(y+14)+'px'; tooltip.style.display='block'; }
+function hideTip(){ tooltip.style.display='none'; }
+function fmt(n, d=2){ if(n===null||n===undefined||isNaN(n)) return '—'; return Number(n).toLocaleString('ko-KR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function fmtPct(n, d=2){ if(n===null||n===undefined||isNaN(n)) return '—'; const s = n>=0?'+':''; return s+n.toFixed(d)+'%'; }
+
+/* ================= CSV 파싱 (Tektronix 다중블록 + 일반 단일헤더 모두 지원) ================= */
+function parseCSVRows(text){
+  return text.split(/\r\n|\n|\r/).map(line => line.split(','));
+}
+function isNumber(s){ if(s===undefined) return false; s = s.trim(); if(s==='') return false; return !isNaN(parseFloat(s)) && isFinite(s); }
+function rowNumericRatio(cells){
+  const nonblank = cells.filter(c => c.trim() !== '');
+  if(!nonblank.length) return 0;
+  const numeric = nonblank.filter(isNumber).length;
+  return numeric/nonblank.length;
+}
+function findDataStart(rows, minRun=5){
+  for(let i=0;i<rows.length;i++){
+    if(rowNumericRatio(rows[i]) >= 0.6){
+      let ok=0, j=i;
+      while(j<rows.length && ok<minRun){
+        const ratio = rowNumericRatio(rows[j]);
+        const blank = rows[j].every(c=>c.trim()==='');
+        if(blank){ j++; continue; }
+        if(ratio<0.6) break;
+        ok++; j++;
+      }
+      if(ok>=minRun) return i;
+    }
+  }
+  return null;
+}
+function parseWaveformCSV(text){
+  const rows = parseCSVRows(text);
+  const dataStart = findDataStart(rows);
+  if(dataStart===null) throw new Error('숫자 데이터를 찾지 못했습니다.');
+  let headerIdx = null;
+  for(let i=dataStart-1;i>=0;i--){
+    if(rows[i].some(c=>c.trim()!=='')){ headerIdx = i; break; }
+  }
+  if(headerIdx===null) headerIdx = Math.max(dataStart-1,0);
+  let header = rows[headerIdx].slice();
+  const dataRows = rows.slice(dataStart).filter(r => !r.every(c=>c.trim()===''));
+  const ncols = Math.max(header.length, ...dataRows.map(r=>r.length));
+  while(header.length<ncols) header.push('');
+
+  const labelPositions = [];
+  header.forEach((h,idx)=>{ if(h.trim()!=='') labelPositions.push([idx, h.trim()]); });
+  if(!labelPositions.length){ header.forEach((h,idx)=>labelPositions.push([idx, 'col'+idx])); }
+
+  const seen = {};
+  const labels = labelPositions.map(([,lb])=>{
+    if(!(lb in seen)){ seen[lb]=0; return lb; }
+    seen[lb]++; return lb+'.'+seen[lb];
+  });
+
+  const columns = {};
+  labelPositions.forEach(([idx], i)=>{
+    const arr = new Float64Array(dataRows.length);
+    for(let r=0;r<dataRows.length;r++){
+      const cell = (dataRows[r][idx]||'').trim();
+      arr[r] = cell==='' ? NaN : parseFloat(cell);
+    }
+    columns[labels[i]] = arr;
+  });
+
+  const timeCol = labels.find(l => l.toUpperCase().startsWith('TIME'));
+  const ch1Col = labels.find(l => l.toUpperCase().startsWith('CH1'));
+  const ch3Col = labels.find(l => l.toUpperCase().startsWith('CH3'));
+  if(!timeCol || !ch1Col || !ch3Col){
+    throw new Error('TIME/CH1/CH3 열을 찾지 못했습니다. (감지된 열: '+labels.join(', ')+')');
+  }
+  return { t: columns[timeCol], ch1: columns[ch1Col], ch3: columns[ch3Col] };
+}
+
+/* ================= 신호 분석 ================= */
+function demod(t, y, freqHz){
+  const w = 2*Math.PI*freqHz;
+  let sa=0, sb=0;
+  const n = t.length;
+  for(let k=0;k<n;k++){
+    const wt = w*t[k];
+    sa += y[k]*Math.cos(wt);
+    sb += y[k]*Math.sin(wt);
+  }
+  const a = 2*sa/n, b = 2*sb/n;
+  const amplitude = Math.hypot(a,b);
+  const phaseDeg = Math.atan2(-b, a) * 180/Math.PI;
+  return {amplitude, phaseDeg};
+}
+function estimateFrequency(t, y, fMin=50e3, fMax=600e3, coarseSteps=120){
+  let best = {freq:fMin, amp:-1};
+  for(let k=0;k<=coarseSteps;k++){
+    const f = fMin + (fMax-fMin)*k/coarseSteps;
+    const amp = demod(t,y,f).amplitude;
+    if(amp>best.amp) best = {freq:f, amp};
+  }
+  const step = (fMax-fMin)/coarseSteps;
+  let lo = Math.max(fMin, best.freq-step), hi = Math.min(fMax, best.freq+step);
+  const gr = (Math.sqrt(5)-1)/2;
+  for(let iter=0; iter<28; iter++){
+    const m1 = hi - gr*(hi-lo), m2 = lo + gr*(hi-lo);
+    const a1 = demod(t,y,m1).amplitude, a2 = demod(t,y,m2).amplitude;
+    if(a1<a2) lo=m1; else hi=m2;
+  }
+  return (lo+hi)/2;
+}
+function meanSq(arr){ let s=0; for(let i=0;i<arr.length;i++) s+=arr[i]*arr[i]; return s/arr.length; }
+function snapWholeCycles(t, freqHz){
+  if(!freqHz || freqHz<=0 || t.length<2) return t.length;
+  const dt = (t[t.length-1]-t[0])/(t.length-1);
+  const periodSamples = (1/freqHz)/dt;
+  const nCycles = Math.floor(t.length/periodSamples);
+  if(nCycles<1) return t.length;
+  return Math.min(t.length, Math.round(nCycles*periodSamples));
+}
+function computeFileStats(t, ch1, ch3, regionMode){
+  const freqHz = estimateFrequency(t, ch1);
+  let n = t.length;
+  if(regionMode==='whole') n = snapWholeCycles(t, freqHz);
+  const tS = t.subarray(0,n), vS = ch1.subarray(0,n), iS = ch3.subarray(0,n);
+  const vrms = Math.sqrt(meanSq(vS));
+  const irms = Math.sqrt(meanSq(iS));
+  let sumP=0; for(let k=0;k<n;k++) sumP += vS[k]*iS[k];
+  const pavg = sumP/n;
+  const sApp = vrms*irms;
+  const dv = demod(tS, vS, freqHz), di = demod(tS, iS, freqHz);
+  // 오실로스코프의 "1→3 위상"(CH1=전압 → CH3=전류) 표시와 부호를 맞추기 위해 전압-전류 순서로 계산한다.
+  let phase = dv.phaseDeg - di.phaseDeg;
+  phase = ((phase+180)%360+360)%360 - 180;
+  // 역률은 0~1 크기만 의미가 있으므로 부호 없이 표시한다(진상/지상 방향은 위상(°) 컬럼으로 확인).
+  const pf = sApp>0 ? Math.abs(pavg/sApp) : null;
+  return {freqHz, vrms, irms, pavg, sApp, pf, phase, nSamples:n};
+}
+
+/* ================= 파일 로드 ================= */
+function parseMinuteFromFilename(name){
+  const m = name.match(/(\d+)\s*-\s*(\d+)\D*\.csv$/i) || name.match(/-(\d+)\.csv$/i);
+  if(!m) return null;
+  return parseInt(m[m.length-1], 10);
+}
+
+async function handleFiles(runNum, fileList){
+  const files = Array.from(fileList);
+  let ok=0, fail=0;
+  const log = [];
+  for(const file of files){
+    const minute = parseMinuteFromFilename(file.name);
+    if(minute===null){
+      fail++; log.push(`${file.name} · 파일명에서 경과분을 못 읽음 (건너뜀)`); continue;
+    }
+    try{
+      const text = await file.text();
+      const {t, ch1, ch3} = parseWaveformCSV(text);
+      state.runs[runNum].files[minute] = { filename:file.name, minute, t, ch1, ch3, raw:{n:t.length} };
+      ok++; log.push(`${file.name} · ${runNum}회차 ${minute}분 · ${t.length.toLocaleString()}개 로드 완료`);
+    }catch(e){
+      fail++; log.push(`${file.name} · 오류: ${e.message}`);
+    }
+  }
+  return {ok, fail, total:files.length, log};
+}
+
+function recomputeAll(){
+  const mode = state.config.region;
+  for(const runNum of [1,2,3]){
+    for(const m in state.runs[runNum].files){
+      const f = state.runs[runNum].files[m];
+      f.stats = computeFileStats(f.t, f.ch1, f.ch3, mode);
+    }
+  }
+}
+
+/* ================= 렌더링 ================= */
+function anyFilesLoaded(){
+  return [1,2,3].some(r => Object.keys(state.runs[r].files).length>0);
+}
+
+function sortedMinutes(runNum){
+  return Object.keys(state.runs[runNum].files).map(Number).sort((a,b)=>a-b);
+}
+function detectInterval(runNum){
+  const mins = sortedMinutes(runNum);
+  if(mins.length<2) return 5;
+  let best = Infinity;
+  for(let i=1;i<mins.length;i++) best = Math.min(best, mins[i]-mins[i-1]);
+  return best===Infinity ? 5 : best;
+}
+function expectedSlots(runNum){
+  const interval = detectInterval(runNum);
+  const plan = state.config.planMinutes;
+  const slots = [];
+  for(let m=interval; m<=plan+1e-9; m+=interval) slots.push(Math.round(m*100)/100);
+  return slots;
+}
+
+function visibleRuns(){
+  if(state.activeTab==='all') return [1,2,3].filter(r=>state.runs[r].visible && sortedMinutes(r).length);
+  return sortedMinutes(Number(state.activeTab)).length ? [Number(state.activeTab)] : [];
+}
+
+function statSeries(runNum, key, scale=1){
+  return sortedMinutes(runNum).map(m => ({m, v: state.runs[runNum].files[m].stats[key]*scale}));
+}
+
+function stddev(arr){
+  const n = arr.length; if(!n) return 0;
+  const mean = arr.reduce((a,b)=>a+b,0)/n;
+  const v = arr.reduce((a,b)=>a+(b-mean)**2,0)/n;
+  return Math.sqrt(v);
+}
+
+function renderStatus(){
+  const el = document.getElementById('statusArea');
+  if(!anyFilesLoaded()){ el.innerHTML=''; return; }
+  const runsWithData = [1,2,3].filter(r=>sortedMinutes(r).length);
+  const totalFiles = runsWithData.reduce((s,r)=>s+sortedMinutes(r).length,0);
+  let html = `<div class="status-line"><span>${runsWithData.length}개 회차 · ${totalFiles}개 파일 · 같은 경과시간에서 회차별 비교</span>`;
+  html += `<div class="legend-toggle">`;
+  runsWithData.forEach(r=>{
+    const off = state.runs[r].visible ? '' : 'off';
+    html += `<span class="legend-item ${off}" data-run="${r}"><span class="sw" style="background:${RUN_COLORS[r]}"></span>${r}회차</span>`;
+  });
+  html += `</div></div>`;
+
+  html += `<details class="filelog-wrap"><summary>파일 처리 로그 보기</summary><div class="filelog">`;
+  runsWithData.forEach(r=>{
+    sortedMinutes(r).forEach(m=>{
+      const f = state.runs[r].files[m];
+      html += `${f.filename} · <b>${r}회차 ${m}분</b> · ${f.t.length.toLocaleString()}개 계산 완료<br>`;
+    });
+  });
+  html += `</div></details>`;
+  el.innerHTML = html;
+
+  el.querySelectorAll('.legend-item').forEach(item=>{
+    item.addEventListener('click', ()=>{
+      const r = Number(item.getAttribute('data-run'));
+      state.runs[r].visible = !state.runs[r].visible;
+      renderAll();
+    });
+  });
+}
+
+function renderSummaryCards(){
+  const grid = document.getElementById('summaryGrid');
+  const runs = state.activeTab==='all' ? [1,2,3].filter(r=>sortedMinutes(r).length) : visibleRuns();
+  grid.innerHTML = '';
+  runs.forEach(r=>{
+    const mins = sortedMinutes(r);
+    const powers = mins.map(m=>state.runs[r].files[m].stats.pavg);
+    const avg = powers.reduce((a,b)=>a+b,0)/powers.length;
+    const firstLast = powers.length>1 ? (powers[powers.length-1]-powers[0])/powers[0]*100 : 0;
+    const cv = avg!==0 ? stddev(powers)/Math.abs(avg)*100 : 0;
+    let minIdx=0, maxIdx=0;
+    powers.forEach((p,i)=>{ if(p<powers[minIdx]) minIdx=i; if(p>powers[maxIdx]) maxIdx=i; });
+    const minFile = state.runs[r].files[mins[minIdx]].filename;
+    const maxFile = state.runs[r].files[mins[maxIdx]].filename;
+    const rangePct = avg!==0 ? (powers[maxIdx]-powers[minIdx])/Math.abs(avg)*100 : 0;
+    const card = document.createElement('div');
+    card.className = 'card summary-card';
+    card.style.setProperty('--run-color', RUN_COLORS[r]);
+    card.innerHTML = `
+      <div class="label"><span>${r}회차 · ${mins.length}개</span></div>
+      <div class="value num">${fmt(avg,2)} W</div>
+      <div class="delta num">
+        <span class="${firstLast<0?'neg':'pos'}">처음→마지막 ${fmtPct(firstLast,2)}</span>
+        <span title="변동계수(Coefficient of Variation) · 표준편차÷평균 — 전체적으로 얼마나 들쭉날쭉한지">CV(변동계수) ${fmt(cv,2)}%</span>
+      </div>
+      <div class="minmax num">
+        <span>최소 ${fmt(powers[minIdx],2)} W <span class="mm-file">(${minFile})</span></span>
+        <span>최대 ${fmt(powers[maxIdx],2)} W <span class="mm-file">(${maxFile})</span></span>
+        <span title="(최대-최소)÷평균 — 가장 튄 두 지점 사이의 간격">최대-최소 차이 ${fmt(rangePct,2)}%</span>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+
+function drawAxes(svg, W,H,padL,padR,padT,padB, x0,x1,y0,y1, xTicks, yTicks, xUnit, yFmt){
+  let out = '';
+  for(let i=0;i<=yTicks;i++){
+    const gy = y0 + (y1-y0)*i/yTicks;
+    const py = H-padB - (gy-y0)/(y1-y0)*(H-padT-padB);
+    out += `<line class="gridline" x1="${padL}" x2="${W-padR}" y1="${py}" y2="${py}"/>`;
+    out += `<text class="axislabel" x="${padL-6}" y="${py+3}" text-anchor="end">${yFmt(gy)}</text>`;
+  }
+  for(let i=0;i<=xTicks;i++){
+    const gx = x0 + (x1-x0)*i/xTicks;
+    const px = padL + (gx-x0)/(x1-x0)*(W-padL-padR);
+    out += `<text class="axislabel" x="${px}" y="${H-6}" text-anchor="middle">${Math.round(gx)}${xUnit}</text>`;
+  }
+  out += `<line class="axisline" x1="${padL}" x2="${W-padR}" y1="${H-padB}" y2="${H-padB}"/>`;
+  return out;
+}
+
+function buildRunPath(xToPx, yToPx, series, expected){
+  // series: sorted [{m,v}], expected: sorted expected minute slots
+  if(!series.length) return {solid:[], dashed:[]};
+  const interval = expected.length>1 ? (expected[1]-expected[0]) : 5;
+  let solid = [], dashed = [];
+  let cur = [series[0]];
+  for(let i=1;i<series.length;i++){
+    const gap = series[i].m - series[i-1].m;
+    if(gap > interval*1.5){
+      solid.push(cur);
+      dashed.push([series[i-1], series[i]]);
+      cur = [series[i]];
+    } else {
+      cur.push(series[i]);
+    }
+  }
+  solid.push(cur);
+  const toPath = pts => pts.map((p,i)=> (i===0?'M':'L')+xToPx(p.m).toFixed(1)+','+yToPx(p.v).toFixed(1)).join(' ');
+  return {
+    solid: solid.filter(s=>s.length>1).map(toPath),
+    dashed: dashed.map(toPath),
+  };
+}
+
+function renderLineChart(svgEl, key, unit, decimals, scale, opts){
+  opts = opts || {};
+  const W = opts.W||440, H = opts.H||140, padL = opts.padL||46, padR=14, padT=12, padB=24;
+  const runs = visibleRuns();
+  if(!runs.length){ svgEl.innerHTML = ''; return; }
+
+  const plan = state.config.planMinutes;
+  const allSeries = {};
+  let y0=Infinity, y1=-Infinity;
+  runs.forEach(r=>{
+    const s = statSeries(r, key, scale);
+    allSeries[r] = s;
+    s.forEach(p=>{ if(p.v<y0)y0=p.v; if(p.v>y1)y1=p.v; });
+  });
+  if(!isFinite(y0)){ svgEl.innerHTML=''; return; }
+  const pad = (y1-y0)*0.15 || Math.abs(y1)*0.05 || 1;
+  y0 -= pad; y1 += pad;
+  const x0 = 0, x1 = plan;
+
+  const xToPx = x => padL + (x-x0)/(x1-x0)*(W-padL-padR);
+  const yToPx = y => H-padB - (y-y0)/(y1-y0)*(H-padT-padB);
+
+  let html = drawAxes(svgEl, W,H,padL,padR,padT,padB, x0,x1,y0,y1, 4, 3, '', v=>v.toFixed(decimals));
+
+  runs.forEach(r=>{
+    const s = allSeries[r];
+    const expected = expectedSlots(r);
+    const {solid, dashed} = buildRunPath(xToPx, yToPx, s, expected);
+    const lineStroke = `color-mix(in srgb, ${RUN_COLORS[r]} 78%, black 22%)`;
+    solid.forEach(d => { html += `<path d="${d}" fill="none" stroke="${lineStroke}" stroke-width="3.3" stroke-linejoin="round" stroke-linecap="round"/>`; });
+    dashed.forEach(d => { html += `<path d="${d}" fill="none" stroke="${lineStroke}" stroke-width="2.4" stroke-dasharray="4 3" opacity="0.9"/>`; });
+    s.forEach(p=>{
+      html += `<circle class="dot" cx="${xToPx(p.m).toFixed(1)}" cy="${yToPx(p.v).toFixed(1)}" r="4.6" fill="${RUN_COLORS[r]}" stroke="var(--surface)" stroke-width="1.6" data-run="${r}" data-m="${p.m}" data-v="${p.v}" style="cursor:pointer"/>`;
+    });
+  });
+
+  svgEl.innerHTML = html;
+  svgEl.querySelectorAll('circle.dot').forEach(dot=>{
+    dot.addEventListener('mouseenter', e=>{
+      const r = dot.getAttribute('data-run'), m = dot.getAttribute('data-m'), v = Number(dot.getAttribute('data-v'));
+      showTip(e.clientX, e.clientY, `<div class="row"><span class="sw" style="background:${RUN_COLORS[r]}"></span><b>${r}회차 ${m}분</b></div><div>${v.toFixed(decimals)} ${unit}</div>`);
+    });
+    dot.addEventListener('mousemove', e=>{ tooltip.style.left=(e.clientX+14)+'px'; tooltip.style.top=(e.clientY+14)+'px'; });
+    dot.addEventListener('mouseleave', hideTip);
+    dot.addEventListener('click', e=>{
+      const r = dot.getAttribute('data-run'), m = dot.getAttribute('data-m'), v = Number(dot.getAttribute('data-v'));
+      const existing = svgEl.querySelector('.pinned-label');
+      if(existing) existing.remove();
+      const label = document.createElementNS('http://www.w3.org/2000/svg','text');
+      label.setAttribute('class','pinned-label');
+      label.setAttribute('x', dot.getAttribute('cx'));
+      label.setAttribute('y', Number(dot.getAttribute('cy'))-8);
+      label.setAttribute('text-anchor','middle');
+      label.textContent = `${r}회차 ${m}분 · ${v.toFixed(decimals)}${unit}`;
+      svgEl.appendChild(label);
+      e.stopPropagation();
+    });
+  });
+}
+
+function renderMainChart(){
+  renderLineChart(document.getElementById('mainChart'), 'pavg', 'W', 2, 1, {W:900,H:280,padL:52});
+}
+
+const MINI_METRICS = [
+  {key:'vrms', label:'전압 RMS', unit:'V', decimals:2, scale:1, padL:40},
+  {key:'irms', label:'전류 RMS', unit:'A', decimals:3, scale:1, padL:42},
+  {key:'pf', label:'역률', unit:'', decimals:4, scale:1, padL:48},
+  {key:'phase', label:'위상차', unit:'°', decimals:2, scale:1, padL:42},
+  {key:'freqHz', label:'주파수', unit:'kHz', decimals:3, scale:0.001, padL:50},
+];
+
+function renderMiniGrid(){
+  const grid = document.getElementById('miniGrid');
+  grid.innerHTML = '';
+  MINI_METRICS.forEach(mm=>{
+    const card = document.createElement('div');
+    card.className = 'card chart-card';
+    card.innerHTML = `<div class="ch-title"><h3>${mm.label}</h3><span class="unit">${mm.unit}</span></div><svg viewBox="0 0 300 140" preserveAspectRatio="none"></svg>`;
+    grid.appendChild(card);
+    renderLineChart(card.querySelector('svg'), mm.key, mm.unit, mm.decimals, mm.scale, {W:300,H:140,padL:mm.padL||40});
+  });
+}
+
+function renderTable(){
+  const runs = state.activeTab==='all' ? [1,2,3] : [Number(state.activeTab)];
+  const rows = [];
+  runs.forEach(r=>{
+    const mins = sortedMinutes(r);
+    mins.forEach((m,idx)=>{
+      const f = state.runs[r].files[m];
+      const s = f.stats;
+      const first = state.runs[r].files[mins[0]].stats.pavg;
+      const prev = idx>0 ? state.runs[r].files[mins[idx-1]].stats.pavg : null;
+      const vsFirst = idx===0 ? 0 : (s.pavg-first)/first*100;
+      const vsPrev = prev===null ? null : (s.pavg-prev)/prev*100;
+      rows.push({run:r, m, filename:f.filename, s, vsFirst, vsPrev});
+    });
+  });
+
+  const cols = ['파일 / 분','회차','P (W)','Vrms (V)','Irms (A)','역률(PF)','위상 (°)','주파수 (kHz)','처음 대비','직전 대비'];
+  let thead = '<thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead>';
+  let tbody = '<tbody>';
+  rows.forEach(row=>{
+    tbody += `<tr>
+      <td>${row.filename}</td>
+      <td><span class="run-chip"><span class="dot" style="background:${RUN_COLORS[row.run]}"></span>${row.run}회차</span></td>
+      <td class="num">${fmt(row.s.pavg,2)}</td>
+      <td class="num">${fmt(row.s.vrms,2)}</td>
+      <td class="num">${fmt(row.s.irms,3)}</td>
+      <td class="num">${fmt(row.s.pf,4)}</td>
+      <td class="num">${fmt(row.s.phase,2)}</td>
+      <td class="num">${fmt(row.s.freqHz/1000,3)}</td>
+      <td class="num">${fmtPct(row.vsFirst,2)}</td>
+      <td class="num">${row.vsPrev===null?'—':fmtPct(row.vsPrev,2)}</td>
+    </tr>`;
+  });
+  tbody += '</tbody>';
+  document.getElementById('dataTable').innerHTML = thead+tbody;
+  document.getElementById('tableCount').textContent = `${rows.length}개 행`;
+}
+
+function renderTabs(){
+  document.querySelectorAll('#tabBar button').forEach(b=>{
+    b.classList.toggle('active', b.getAttribute('data-tab')===state.activeTab);
+  });
+}
+
+function renderAll(){
+  const loaded = anyFilesLoaded();
+  document.getElementById('emptyState').style.display = loaded ? 'none' : 'flex';
+  document.getElementById('mainContent').style.display = loaded ? 'flex' : 'none';
+  renderStatus();
+  if(!loaded) return;
+  renderTabs();
+  renderSummaryCards();
+  renderMainChart();
+  renderMiniGrid();
+  renderTable();
+}
+
+/* ================= 이벤트 배선 ================= */
+document.getElementById('openRun1').addEventListener('click', ()=>document.getElementById('fileInput1').click());
+document.getElementById('openRun2').addEventListener('click', ()=>document.getElementById('fileInput2').click());
+document.getElementById('openRun3').addEventListener('click', ()=>document.getElementById('fileInput3').click());
+
+[1,2,3].forEach(r=>{
+  document.getElementById('fileInput'+r).addEventListener('change', async (e)=>{
+    if(!e.target.files.length) return;
+    await handleFiles(r, e.target.files);
+    recomputeAll();
+    renderAll();
+    e.target.value = '';
+  });
+});
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  state.runs = {1:{files:{}, visible:true}, 2:{files:{}, visible:true}, 3:{files:{}, visible:true}};
+  state.activeTab = 'all';
+  renderTabs();
+  renderAll();
+});
+
+async function exportPDF(){
+  if(!anyFilesLoaded()) return;
+  const btn = document.getElementById('pdfBtn');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '생성 중…';
+  const prevTheme = document.documentElement.getAttribute('data-theme');
+  document.documentElement.setAttribute('data-theme', 'light'); // PDF는 항상 밝은 테마로 고정(가독성 확보)
+  document.body.classList.add('pdf-exporting');
+  await new Promise(r=>setTimeout(r, 60)); // 레이아웃 반영 대기
+
+  try{
+    if(typeof html2canvas==='undefined' || typeof window.jspdf==='undefined'){
+      throw new Error('PDF 라이브러리를 불러오지 못했습니다.');
+    }
+    const target = document.querySelector('.wrap');
+    const scale = 4;
+
+    // 페이지를 나눌 때 표의 한 행(또는 카드)이 중간에 잘리지 않도록,
+    // 잘라도 되는 요소들의 위치(픽셀, canvas 좌표계)를 미리 측정해둔다.
+    const targetRect = target.getBoundingClientRect();
+    const protectedZones = [];
+    target.querySelectorAll('table tr, .card').forEach(el=>{
+      const r = el.getBoundingClientRect();
+      const top = (r.top - targetRect.top) * scale;
+      const bottom = (r.bottom - targetRect.top) * scale;
+      if(bottom > top) protectedZones.push([top, bottom]);
+    });
+    protectedZones.sort((a,b)=>a[0]-b[0]);
+    function adjustBreak(pos, minStart){
+      for(const [top, bottom] of protectedZones){
+        if(pos > top + 0.5 && pos < bottom - 0.5){
+          // 이 지점에서 자르면 요소가 반으로 잘림 -> 그 요소 시작 지점으로 당겨서
+          // 요소 전체를 다음 페이지로 넘긴다 (단, 한 페이지 분량보다 큰 요소는 어쩔 수 없이 그대로 자름)
+          return top > minStart ? top : pos;
+        }
+      }
+      return pos;
+    }
+
+    // 표가 페이지 경계에서 이어질 때, 이어지는 페이지 맨 위에 헤더 행을 다시 그려준다.
+    let tableTop = null, tableBottom = null, theadTop = null, theadBottom = null, tableLeft = null, tableRight = null;
+    const tableWrapEl = target.querySelector('.table-scroll');
+    const tableEl = target.querySelector('table');
+    const theadEl = tableEl ? tableEl.querySelector('thead') : null;
+    if(tableWrapEl && tableEl && theadEl){
+      const wr = tableWrapEl.getBoundingClientRect();
+      const hr = theadEl.getBoundingClientRect();
+      tableTop = (wr.top - targetRect.top) * scale;
+      tableBottom = (wr.bottom - targetRect.top) * scale;
+      tableLeft = (wr.left - targetRect.left) * scale;
+      tableRight = (wr.right - targetRect.left) * scale;
+      theadTop = (hr.top - targetRect.top) * scale;
+      theadBottom = (hr.bottom - targetRect.top) * scale;
+    }
+    const headerHeightPx = (theadTop!==null) ? (theadBottom - theadTop) : 0;
+    // 표 테두리와 같은 색/굵기로 페이지가 잘리는 자리에도 테두리를 그려준다 (카드류와 통일감 유지).
+    const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-strong').trim() || 'rgba(11,11,11,0.55)';
+    const borderPx = Math.max(1, Math.round(scale));
+
+    const canvas = await html2canvas(target, {scale, backgroundColor:'#ffffff', useCORS:true});
+
+    const { jsPDF } = window.jspdf;
+    const pageW = 210, pageH = 297, marginMM = 8; // A4, mm
+    const imgW = pageW - marginMM*2;
+    const pxPerMM = canvas.width / imgW;
+    const pageUsablePx = Math.floor((pageH - marginMM*2) * pxPerMM);
+
+    const doc = new jsPDF({unit:'mm', format:'a4'});
+    let renderedPx = 0, first = true;
+    while(renderedPx < canvas.height){
+      // 이 페이지가 표 중간(헤더 이후)에서 시작하면, 헤더를 다시 그려줄 자리를 위쪽에 남겨둔다.
+      const repeatHeader = headerHeightPx>0 && renderedPx > theadBottom + 0.5 && renderedPx < tableBottom - 0.5;
+      const bodyBudget = repeatHeader ? Math.max(1, pageUsablePx - headerHeightPx) : pageUsablePx;
+
+      let sliceEnd = Math.min(renderedPx + bodyBudget, canvas.height);
+      if(sliceEnd < canvas.height) sliceEnd = adjustBreak(sliceEnd, renderedPx);
+      const sliceH = sliceEnd - renderedPx;
+
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = canvas.width;
+      pageCanvas.height = sliceH + (repeatHeader ? headerHeightPx : 0);
+      const pctx = pageCanvas.getContext('2d');
+      pctx.fillStyle = '#ffffff';
+      pctx.fillRect(0,0,pageCanvas.width,pageCanvas.height);
+      let yOffset = 0;
+      if(repeatHeader){
+        pctx.drawImage(canvas, 0, theadTop, canvas.width, headerHeightPx, 0, 0, canvas.width, headerHeightPx);
+        yOffset = headerHeightPx;
+      }
+      pctx.drawImage(canvas, 0, renderedPx, canvas.width, sliceH, 0, yOffset, canvas.width, sliceH);
+
+      // 표가 이 페이지 경계에서 잘리면, 잘린 자리에도 같은 굵기/색의 테두리를 그려서
+      // 카드·표 다른 곳과 통일된 프레임처럼 보이게 한다.
+      if(tableLeft!==null){
+        pctx.strokeStyle = borderColor;
+        pctx.lineWidth = borderPx;
+        const halfLine = borderPx/2;
+        if(repeatHeader){
+          // 이어지는 헤더 블록 위쪽을 닫아준다.
+          pctx.beginPath();
+          pctx.moveTo(tableLeft, halfLine);
+          pctx.lineTo(tableRight, halfLine);
+          pctx.stroke();
+        }
+        if(tableBottom!==null && sliceEnd < tableBottom - 0.5 && renderedPx < tableBottom){
+          // 표가 다음 페이지로 계속 이어지면, 이 페이지 맨 아래를 닫아준다.
+          const closeY = pageCanvas.height - halfLine;
+          pctx.beginPath();
+          pctx.moveTo(tableLeft, closeY);
+          pctx.lineTo(tableRight, closeY);
+          pctx.stroke();
+        }
+      }
+
+      if(!first) doc.addPage();
+      doc.addImage(pageCanvas.toDataURL('image/jpeg', 0.98), 'JPEG', marginMM, marginMM, imgW, pageCanvas.height/pxPerMM);
+      renderedPx += sliceH;
+      first = false;
+    }
+
+    const blob = doc.output('blob');
+    const ts = new Date();
+    const p2 = n=>String(n).padStart(2,'0');
+    const filename = `run_monitor_${ts.getFullYear()}${p2(ts.getMonth()+1)}${p2(ts.getDate())}_${p2(ts.getHours())}${p2(ts.getMinutes())}.pdf`;
+
+    // 일반 웹페이지용 표준 브라우저 다운로드 (로그인/권한 불필요)
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(blobUrl), 2000);
+    btn.textContent = '저장 완료 ✓';
+  }catch(err){
+    console.error('PDF export failed', err);
+    btn.textContent = '저장 실패';
+  }finally{
+    document.body.classList.remove('pdf-exporting');
+    if(prevTheme===null) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', prevTheme);
+    setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 1800);
+  }
+}
+document.getElementById('pdfBtn').addEventListener('click', exportPDF);
+
+document.getElementById('tabBar').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button'); if(!btn) return;
+  state.activeTab = btn.getAttribute('data-tab');
+  renderAll();
+});
+
+document.getElementById('regionMode').addEventListener('change', (e)=>{
+  state.config.region = e.target.value;
+  recomputeAll();
+  renderAll();
+});
+document.getElementById('planMinutes').addEventListener('input', (e)=>{
+  const v = parseFloat(e.target.value);
+  state.config.planMinutes = isFinite(v) && v>0 ? v : 60;
+  renderAll();
+});
+
+renderAll();
+</script>
+
+</body>
+</html>
+

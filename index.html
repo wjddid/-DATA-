@@ -172,10 +172,26 @@ body.pdf-exporting .wrap{ max-width:100%; }
 .pdf-graph-sheet .mini-grid{ grid-template-columns:repeat(3,1fr) !important; gap:14px; }
 .pdf-graph-sheet .mini-grid .chart-card svg{ height:215px !important; }
 .pdf-graph-sheet .hint{ font-size:12px; }
-.pdf-data-sheet .table-scroll{ overflow:visible; box-shadow:none; border:1px solid #555; }
-.pdf-data-sheet table{ min-width:0; table-layout:fixed; }
-.pdf-data-sheet thead th{ font-size:11px; padding:8px 6px; border-bottom:2px solid #555; }
-.pdf-data-sheet tbody td{ font-size:12px; padding:6px; }
+.pdf-data-sheet .table-scroll{
+  overflow:visible; box-shadow:none; border:0; border-radius:0; padding:0;
+}
+.pdf-data-sheet table{
+  min-width:0; table-layout:fixed; border-collapse:collapse;
+  border:2px solid #555; background:#fff;
+}
+.pdf-data-sheet thead th{
+  font-size:11px; padding:8px 6px;
+  border:1px solid #aaa; border-top:0; border-bottom:2px solid #555;
+}
+.pdf-data-sheet tbody td{
+  font-size:12px; padding:6px;
+  border:1px solid #c7c7c7;
+}
+.pdf-data-sheet thead th:first-child,
+.pdf-data-sheet tbody td:first-child{ border-left:0; }
+.pdf-data-sheet thead th:last-child,
+.pdf-data-sheet tbody td:last-child{ border-right:0; }
+.pdf-data-sheet tbody tr:last-child td{ border-bottom:0; }
 .pdf-data-sheet thead th:first-child{ width:17%; }
 .pdf-data-sheet .table-caption{ margin-top:8px; color:#555; font-size:11px; }
 

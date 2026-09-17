@@ -214,6 +214,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
       <button class="btn run3" id="openRun3">3회차 파일 열기</button>
       <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
       <button class="btn primary" id="pdfBtn">PDF 저장</button>
+      <button class="btn" id="shareBtn">공유 링크 만들기</button>
       <input type="file" id="fileInput1" multiple accept=".csv">
       <input type="file" id="fileInput2" multiple accept=".csv">
       <input type="file" id="fileInput3" multiple accept=".csv">
@@ -287,6 +288,7 @@ const state = {
   config: {region:'whole', planMinutes:60},
   activeTab: 'all',
   pinned: null,
+  sharedView: false,
 };
 
 const tooltip = document.getElementById('tooltip');
@@ -294,6 +296,96 @@ function showTip(x,y,html){ tooltip.innerHTML = html; tooltip.style.left=(x+14)+
 function hideTip(){ tooltip.style.display='none'; }
 function fmt(n, d=2){ if(n===null||n===undefined||isNaN(n)) return '—'; return Number(n).toLocaleString('ko-KR',{minimumFractionDigits:d,maximumFractionDigits:d}); }
 function fmtPct(n, d=2){ if(n===null||n===undefined||isNaN(n)) return '—'; const s = n>=0?'+':''; return s+n.toFixed(d)+'%'; }
+
+function encodeSharePayload(value){
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  let binary = '';
+  for(let i=0;i<bytes.length;i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function decodeSharePayload(value){
+  let base64 = value.replace(/-/g,'+').replace(/_/g,'/');
+  while(base64.length%4) base64 += '=';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++) bytes[i] = binary.charCodeAt(i);
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+function compactNumber(value){
+  return Number.isFinite(Number(value)) ? Number(Number(value).toPrecision(10)) : null;
+}
+function buildSharePayload(){
+  const rows = [];
+  [1,2,3].forEach(run=>{
+    sortedMinutes(run).forEach(minute=>{
+      const file = state.runs[run].files[minute];
+      const st = file.stats;
+      rows.push([
+        run, minute, file.filename,
+        file.raw && file.raw.n ? file.raw.n : (file.t && file.t.length ? file.t.length : 0),
+        compactNumber(st.pavg), compactNumber(st.vrms), compactNumber(st.irms),
+        compactNumber(st.pf), compactNumber(st.phase), compactNumber(st.freqHz)
+      ]);
+    });
+  });
+  return {v:1, plan:state.config.planMinutes, tab:state.activeTab, rows};
+}
+async function copyText(text){
+  if(navigator.clipboard && window.isSecureContext){
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.position = 'fixed';
+  area.style.left = '-9999px';
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand('copy');
+  area.remove();
+}
+async function shareCurrentView(){
+  if(!anyFilesLoaded()) return;
+  const btn = document.getElementById('shareBtn');
+  const original = btn.textContent;
+  try{
+    const encoded = encodeSharePayload(buildSharePayload());
+    const url = location.origin + location.pathname + '#share=' + encoded;
+    await copyText(url);
+    btn.textContent = '링크 복사 완료 ✓';
+  }catch(err){
+    console.error('Share link failed',err);
+    btn.textContent = '링크 생성 실패';
+  }finally{
+    setTimeout(()=>{ btn.textContent = original; },1800);
+  }
+}
+function loadSharedView(){
+  if(!location.hash.startsWith('#share=')) return false;
+  try{
+    const payload = decodeSharePayload(location.hash.slice(7));
+    if(!payload || payload.v!==1 || !Array.isArray(payload.rows)) return false;
+    state.runs = {1:{files:{},visible:true},2:{files:{},visible:true},3:{files:{},visible:true}};
+    payload.rows.forEach(row=>{
+      const [run,minute,filename,samples,pavg,vrms,irms,pf,phase,freqHz] = row;
+      if(!state.runs[run] || !Number.isFinite(Number(minute))) return;
+      state.runs[run].files[minute] = {
+        filename, minute, t:{length:samples||0}, ch1:null, ch3:null,
+        raw:{n:samples||0}, shared:true,
+        stats:{pavg,vrms,irms,pf,phase,freqHz}
+      };
+    });
+    state.config.planMinutes = Number(payload.plan)||60;
+    state.activeTab = ['all','1','2','3'].includes(String(payload.tab)) ? String(payload.tab) : 'all';
+    state.sharedView = true;
+    document.getElementById('planMinutes').value = state.config.planMinutes;
+    document.getElementById('regionMode').disabled = true;
+    return true;
+  }catch(err){
+    console.error('Shared view load failed',err);
+    return false;
+  }
+}
 
 /* ================= CSV 파싱 (Tektronix 다중블록 + 일반 단일헤더 모두 지원) ================= */
 function parseCSVRows(text){
@@ -458,7 +550,7 @@ function recomputeAll(){
   for(const runNum of [1,2,3]){
     for(const m in state.runs[runNum].files){
       const f = state.runs[runNum].files[m];
-      f.stats = computeFileStats(f.t, f.ch1, f.ch3, mode);
+      if(!f.shared) f.stats = computeFileStats(f.t, f.ch1, f.ch3, mode);
     }
   }
 }
@@ -507,7 +599,8 @@ function renderStatus(){
   if(!anyFilesLoaded()){ el.innerHTML=''; return; }
   const runsWithData = [1,2,3].filter(r=>sortedMinutes(r).length);
   const totalFiles = runsWithData.reduce((s,r)=>s+sortedMinutes(r).length,0);
-  let html = `<div class="status-line"><span>${runsWithData.length}개 회차 · ${totalFiles}개 파일 · 같은 경과시간에서 회차별 비교</span>`;
+  const sharedLabel = state.sharedView ? ' · 공유된 결과 보기' : '';
+  let html = `<div class="status-line"><span>${runsWithData.length}개 회차 · ${totalFiles}개 파일 · 같은 경과시간에서 회차별 비교${sharedLabel}</span>`;
   html += `<div class="legend-toggle">`;
   runsWithData.forEach(r=>{
     const off = state.runs[r].visible ? '' : 'off';
@@ -768,6 +861,9 @@ document.getElementById('openRun3').addEventListener('click', ()=>document.getEl
 document.getElementById('resetBtn').addEventListener('click', ()=>{
   state.runs = {1:{files:{}, visible:true}, 2:{files:{}, visible:true}, 3:{files:{}, visible:true}};
   state.activeTab = 'all';
+  state.sharedView = false;
+  document.getElementById('regionMode').disabled = false;
+  if(location.hash.startsWith('#share=')) history.replaceState(null,'',location.pathname+location.search);
   renderTabs();
   renderAll();
 });
@@ -864,6 +960,7 @@ async function exportPDF(){
   }
 }
 document.getElementById('pdfBtn').addEventListener('click', exportPDF);
+document.getElementById('shareBtn').addEventListener('click', shareCurrentView);
 
 document.getElementById('tabBar').addEventListener('click', (e)=>{
   const btn = e.target.closest('button'); if(!btn) return;
@@ -882,6 +979,7 @@ document.getElementById('planMinutes').addEventListener('input', (e)=>{
   renderAll();
 });
 
+loadSharedView();
 renderAll();
 </script>
 

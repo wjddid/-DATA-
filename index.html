@@ -133,6 +133,29 @@ tbody tr:hover td{ background:color-mix(in srgb, var(--run1) 10%, transparent); 
 .flag.ok{ color:var(--muted); }
 .table-caption{ font-size:0.74rem; color:var(--muted); display:flex; justify-content:space-between; padding:4px 2px; }
 
+.share-modal[hidden]{ display:none; }
+.share-modal{ position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; }
+.share-modal-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.48); }
+.share-dialog{ position:relative; width:min(760px,100%); max-height:min(720px,88vh); overflow:hidden; display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--border-strong); border-radius:14px; box-shadow:0 18px 60px rgba(0,0,0,.28); }
+.share-dialog-head{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; padding:18px 20px; border-bottom:1px solid var(--border); }
+.share-dialog-head h2{ margin:0 0 4px; font-size:1.15rem; }
+.share-dialog-head p{ margin:0; color:var(--muted); font-size:.78rem; }
+.share-list{ overflow:auto; padding:10px 20px; }
+.share-list-empty{ padding:42px 12px; text-align:center; color:var(--muted); }
+.share-list-item{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 14px; align-items:center; padding:13px 2px; border-bottom:1px solid var(--border); }
+.share-list-item:last-child{ border-bottom:0; }
+.share-list-title{ font-weight:700; font-size:.9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.share-list-date{ color:var(--muted); font-size:.73rem; margin-top:3px; }
+.share-list-actions{ display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+.share-list-actions .btn{ padding:6px 10px; font-size:.75rem; }
+.share-list-actions .delete{ color:var(--crit); border-color:color-mix(in srgb,var(--crit) 45%,var(--border)); }
+.share-list-note{ margin:0; padding:11px 20px 15px; border-top:1px solid var(--border); color:var(--muted); font-size:.72rem; }
+#shareListCount{ display:inline-flex; min-width:18px; height:18px; padding:0 5px; align-items:center; justify-content:center; border-radius:99px; background:var(--surface-2); font-size:.7rem; }
+@media(max-width:560px){
+  .share-list-item{ grid-template-columns:1fr; }
+  .share-list-actions{ justify-content:flex-start; }
+}
+
 .empty-state{ display:flex; flex-direction:column; align-items:center; gap:10px; padding:50px 20px; color:var(--muted); text-align:center; font-size:0.9rem; }
 .empty-state b{ color:var(--text-2); }
 
@@ -219,6 +242,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
       <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
       <button class="btn primary" id="pdfBtn">PDF 저장</button>
       <button class="btn" id="shareBtn">공유 링크 만들기</button>
+      <button class="btn" id="shareListBtn">공유 목록 <span id="shareListCount">0</span></button>
     </div>
   </header>
 
@@ -290,6 +314,21 @@ body.pdf-exporting .wrap{ max-width:100%; }
     P는 같은 시점의 전압×전류를 먼저 곱한 뒤 평균(mean(v·i))한 유효전력입니다. Vrms/Irms는 구간 전체의 실효값, 위상은 추정 주파수에서의 동기검출로 구합니다.
     "완전한 주기"를 선택하면 각 파일의 기록 시작점부터 정수 개 사이클만 남기고 계산합니다. PF와 위상차는 완전히 같은 정보가 아니라서(파형이 왜곡되면 PF ≠ cos(위상차)) 둘 다 표시합니다.
   </footer>
+</div>
+
+<div class="share-modal" id="shareModal" hidden>
+  <div class="share-modal-backdrop" data-close-share-list></div>
+  <section class="share-dialog" role="dialog" aria-modal="true" aria-labelledby="shareDialogTitle">
+    <div class="share-dialog-head">
+      <div>
+        <h2 id="shareDialogTitle">공유 링크 목록</h2>
+        <p>이 브라우저에서 만든 링크를 최신순으로 저장합니다.</p>
+      </div>
+      <button class="btn" id="closeShareListBtn">닫기</button>
+    </div>
+    <div class="share-list" id="shareListBody"></div>
+    <p class="share-list-note">삭제하면 이 브라우저의 목록에서만 없어집니다. 이미 전달한 링크는 계속 열립니다.</p>
+  </section>
 </div>
 
 <div class="tooltip" id="tooltip"></div>
@@ -418,6 +457,67 @@ async function copyText(text){
   document.execCommand('copy');
   area.remove();
 }
+const SHARE_LIST_KEY = 'power-monitor-share-links-v1';
+function getShareHistory(){
+  try{
+    const parsed = JSON.parse(localStorage.getItem(SHARE_LIST_KEY)||'[]');
+    return Array.isArray(parsed) ? parsed : [];
+  }catch(err){ return []; }
+}
+function setShareHistory(items){
+  try{ localStorage.setItem(SHARE_LIST_KEY,JSON.stringify(items.slice(0,30))); }
+  catch(err){ console.error('Share history save failed',err); }
+  updateShareListCount();
+}
+function buildShareTitle(){
+  const names = runIds().filter(run=>sortedMinutes(run).length).map(run=>runName(run));
+  const fileCount = runIds().reduce((sum,run)=>sum+sortedMinutes(run).length,0);
+  return (names.join(' · ')||'전력 모니터링')+' · '+fileCount+'개 파일';
+}
+function rememberShareLink(url){
+  const now = new Date().toISOString();
+  const item = {id:String(Date.now())+'-'+Math.random().toString(36).slice(2,7),title:buildShareTitle(),url,createdAt:now};
+  const items = getShareHistory().filter(existing=>existing.url!==url);
+  items.unshift(item);
+  setShareHistory(items);
+}
+function updateShareListCount(){
+  const count = getShareHistory().length;
+  const badge = document.getElementById('shareListCount');
+  if(badge) badge.textContent = String(count);
+}
+function formatShareDate(value){
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function renderShareList(){
+  const body = document.getElementById('shareListBody');
+  const items = getShareHistory();
+  updateShareListCount();
+  if(!items.length){
+    body.innerHTML = '<div class="share-list-empty">아직 만든 공유 링크가 없습니다.</div>';
+    return;
+  }
+  body.innerHTML = items.map(item=>
+    '<div class="share-list-item">'+
+      '<div><div class="share-list-title">'+escapeHtml(item.title||'공유 결과')+'</div>'+
+      '<div class="share-list-date">'+escapeHtml(formatShareDate(item.createdAt))+'</div></div>'+
+      '<div class="share-list-actions">'+
+        '<button class="btn" data-copy-share="'+escapeHtml(item.id)+'">링크 복사</button>'+
+        '<button class="btn" data-open-share="'+escapeHtml(item.id)+'">열기</button>'+
+        '<button class="btn delete" data-delete-share="'+escapeHtml(item.id)+'">삭제</button>'+
+      '</div>'+
+    '</div>'
+  ).join('');
+}
+function openShareList(){
+  renderShareList();
+  document.getElementById('shareModal').hidden = false;
+}
+function closeShareList(){
+  document.getElementById('shareModal').hidden = true;
+}
+
 async function shareCurrentView(){
   if(!anyFilesLoaded()) return;
   const btn = document.getElementById('shareBtn');
@@ -426,7 +526,8 @@ async function shareCurrentView(){
     const encoded = encodeSharePayload(buildSharePayload());
     const url = location.origin + location.pathname + '#share=' + encoded;
     await copyText(url);
-    btn.textContent = '링크 복사 완료 ✓';
+    rememberShareLink(url);
+    btn.textContent = '링크 저장·복사 완료 ✓';
   }catch(err){
     console.error('Share link failed',err);
     btn.textContent = '링크 생성 실패';
@@ -1087,6 +1188,30 @@ async function exportPDF(){
 }
 document.getElementById('pdfBtn').addEventListener('click', exportPDF);
 document.getElementById('shareBtn').addEventListener('click', shareCurrentView);
+document.getElementById('shareListBtn').addEventListener('click',openShareList);
+document.getElementById('closeShareListBtn').addEventListener('click',closeShareList);
+document.querySelector('[data-close-share-list]').addEventListener('click',closeShareList);
+document.getElementById('shareListBody').addEventListener('click',async e=>{
+  const copyButton = e.target.closest('[data-copy-share]');
+  const openButton = e.target.closest('[data-open-share]');
+  const deleteButton = e.target.closest('[data-delete-share]');
+  const id = (copyButton||openButton||deleteButton)?.getAttribute(copyButton?'data-copy-share':openButton?'data-open-share':'data-delete-share');
+  if(!id) return;
+  const items = getShareHistory();
+  const item = items.find(entry=>entry.id===id);
+  if(copyButton && item){
+    await copyText(item.url);
+    const old = copyButton.textContent;
+    copyButton.textContent = '복사 완료 ✓';
+    setTimeout(()=>{ copyButton.textContent=old; },1200);
+  }else if(openButton && item){
+    window.open(item.url,'_blank','noopener');
+  }else if(deleteButton){
+    setShareHistory(items.filter(entry=>entry.id!==id));
+    renderShareList();
+  }
+});
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeShareList(); });
 
 document.getElementById('tabBar').addEventListener('click', (e)=>{
   const btn = e.target.closest('button'); if(!btn) return;
@@ -1108,6 +1233,7 @@ document.getElementById('planMinutes').addEventListener('input', (e)=>{
 loadSharedView();
 document.getElementById('runCountSelect').value = String(state.runCount);
 renderRunControls();
+updateShareListCount();
 renderAll();
 </script>
 

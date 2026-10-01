@@ -915,6 +915,15 @@ function renderSummaryCards(){
   });
 }
 
+function timeTicks(start,end,interval){
+  const base = Number.isFinite(interval) && interval>0 ? interval : 5;
+  const step = Math.max(base,Math.ceil((end-start)/4/base)*base);
+  const ticks = [start];
+  const first = Math.ceil((start+1e-9)/step)*step;
+  for(let value=first;value<end-1e-9;value+=step) ticks.push(value);
+  if(end>start+1e-9) ticks.push(end);
+  return ticks;
+}
 function drawAxes(svg, W,H,padL,padR,padT,padB, x0,x1,y0,y1, xTicks, yTicks, xUnit, yFmt){
   let out = '';
   for(let i=0;i<=yTicks;i++){
@@ -923,11 +932,10 @@ function drawAxes(svg, W,H,padL,padR,padT,padB, x0,x1,y0,y1, xTicks, yTicks, xUn
     out += `<line class="gridline" x1="${padL}" x2="${W-padR}" y1="${py}" y2="${py}"/>`;
     out += `<text class="axislabel" x="${padL-6}" y="${py+3}" text-anchor="end">${yFmt(gy)}</text>`;
   }
-  for(let i=0;i<=xTicks;i++){
-    const gx = x0 + (x1-x0)*i/xTicks;
+  xTicks.forEach(gx=>{
     const px = padL + (gx-x0)/(x1-x0)*(W-padL-padR);
-    out += `<text class="axislabel" x="${px}" y="${H-6}" text-anchor="middle">${Math.round(gx)}${xUnit}</text>`;
-  }
+    out += `<text class="axislabel" x="${px}" y="${H-6}" text-anchor="middle">${Number(gx.toFixed(2))}${xUnit}</text>`;
+  });
   out += `<line class="axisline" x1="${padL}" x2="${W-padR}" y1="${H-padB}" y2="${H-padB}"/>`;
   return out;
 }
@@ -973,12 +981,15 @@ function renderLineChart(svgEl, key, unit, decimals, scale, opts){
   if(!isFinite(y0)){ svgEl.innerHTML=''; return; }
   const pad = (y1-y0)*0.15 || Math.abs(y1)*0.05 || 1;
   y0 -= pad; y1 += pad;
-  const x0 = 0, x1 = plan;
+  const minutes = runs.flatMap(r=>allSeries[r].map(point=>point.m)).filter(Number.isFinite);
+  const x0 = Math.min(...minutes);
+  const x1 = Math.max(plan,...minutes,x0+(state.config.tekIntervalMinutes||5));
+  const ticks = timeTicks(x0,x1,state.config.tekIntervalMinutes);
 
   const xToPx = x => padL + (x-x0)/(x1-x0)*(W-padL-padR);
   const yToPx = y => H-padB - (y-y0)/(y1-y0)*(H-padT-padB);
 
-  let html = drawAxes(svgEl, W,H,padL,padR,padT,padB, x0,x1,y0,y1, 4, 3, '', v=>v.toFixed(decimals));
+  let html = drawAxes(svgEl, W,H,padL,padR,padT,padB, x0,x1,y0,y1, ticks, 3, '분', v=>v.toFixed(decimals));
 
   runs.forEach(r=>{
     const s = allSeries[r];

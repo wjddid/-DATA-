@@ -68,6 +68,13 @@ header.page .sub{ margin:0; color:var(--text-2); font-size:0.86rem; }
 .region-explain{ margin-top:-6px; display:flex; flex-direction:column; gap:4px; font-size:0.78rem; color:var(--text-2); line-height:1.55; }
 .region-explain b{ color:var(--text); }
 
+/* dynamic comparison inputs */
+.run-upload-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; }
+.run-upload-item{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:end; padding:12px; border:1px solid var(--border); border-left:4px solid var(--run-color); border-radius:10px; background:var(--surface); }
+.run-upload-item label{ grid-column:1/-1; font-size:0.7rem; color:var(--muted); font-weight:700; letter-spacing:.03em; }
+.run-name-input{ min-width:0; width:100%; font:inherit; font-size:0.86rem; font-weight:600; padding:8px 9px; border-radius:7px; border:1px solid var(--border); background:var(--bg); color:var(--text); }
+.run-file-meta{ grid-column:1/-1; font-size:0.72rem; color:var(--muted); }
+
 /* status / legend */
 .status-line{ display:flex; flex-wrap:wrap; align-items:center; gap:10px 18px; font-size:0.82rem; color:var(--text-2); }
 .legend-toggle{ display:flex; gap:12px; flex-wrap:wrap; }
@@ -206,29 +213,30 @@ body.pdf-exporting .wrap{ max-width:100%; }
     <div class="titles">
       <span class="eyebrow">Waveform Lab · Run Monitor</span>
       <h1>전력 모니터링</h1>
-      <p class="sub">회차별로 저장한 오실로스코프 CSV를 불러와 같은 경과시간끼리 비교합니다. 파일명은 <span class="num">회차-경과분.csv</span> 형식(예: 1-5.csv)을 인식합니다.</p>
+      <p class="sub">비교할 데이터 수와 이름을 직접 정한 뒤, 각 데이터의 오실로스코프 CSV를 불러옵니다. 파일명 끝의 <span class="num">-경과분.csv</span> 형식(예: 시험A-5.csv)을 인식합니다.</p>
     </div>
     <div class="toolbar">
-      <button class="btn run1" id="openRun1">1회차 파일 열기</button>
-      <button class="btn run2" id="openRun2">2회차 파일 열기</button>
-      <button class="btn run3" id="openRun3">3회차 파일 열기</button>
       <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
       <button class="btn primary" id="pdfBtn">PDF 저장</button>
       <button class="btn" id="shareBtn">공유 링크 만들기</button>
-      <input type="file" id="fileInput1" multiple accept=".csv">
-      <input type="file" id="fileInput2" multiple accept=".csv">
-      <input type="file" id="fileInput3" multiple accept=".csv">
     </div>
   </header>
 
-  <div class="tabs" id="tabBar">
-    <button data-tab="all" class="active">전체 비교</button>
-    <button data-tab="1">1회차</button>
-    <button data-tab="2">2회차</button>
-    <button data-tab="3">3회차</button>
-  </div>
-
   <div class="config">
+    <div class="field">
+      <label>비교 데이터 수</label>
+      <select id="runCountSelect">
+        <option value="2">2개</option>
+        <option value="3">3개</option>
+        <option value="4">4개</option>
+        <option value="5">5개</option>
+        <option value="6">6개</option>
+        <option value="7">7개</option>
+        <option value="8">8개</option>
+        <option value="9">9개</option>
+        <option value="10">10개</option>
+      </select>
+    </div>
     <div class="field">
       <label>계산 구간</label>
       <select id="regionMode">
@@ -241,9 +249,15 @@ body.pdf-exporting .wrap{ max-width:100%; }
       <input type="number" id="planMinutes" value="60" min="1" step="1">
     </div>
   </div>
+
+  <div class="run-upload-grid" id="runUploadGrid"></div>
+
+  <div class="tabs" id="tabBar"></div>
+
   <div class="region-explain">
+    <div><b>데이터 이름</b> — 각 입력칸에 ‘1회차’, ‘설비 A’, ‘조건 350V’처럼 원하는 이름을 직접 입력할 수 있습니다.</div>
     <div><b>전체 기록</b> — 파일에 저장된 파형 데이터(약 10,000개 포인트) 전체를 그대로 사용해 계산합니다.</div>
-    <div><b>완전한 주기</b> — 추정 주파수를 기준으로 앞부분부터 정수 개 사이클만 남기고, 끝에 어중간하게 걸치는 자투리 구간은 잘라낸 뒤 계산합니다. 값이 더 안정적이라 보통 이쪽을 권장합니다.</div>
+    <div><b>완전한 주기</b> — 추정 주파수를 기준으로 정수 개 사이클만 계산해 값을 안정화합니다.</div>
   </div>
 
   <div id="statusArea"></div>
@@ -282,14 +296,26 @@ body.pdf-exporting .wrap{ max-width:100%; }
 
 <script>
 'use strict';
-const RUN_COLORS = {1:'var(--run1)', 2:'var(--run2)', 3:'var(--run3)'};
+const MAX_RUNS = 10;
+const RUN_COLORS = {
+  1:'#2a78d6', 2:'#eb6834', 3:'#1baf7a', 4:'#8b5cf6', 5:'#d946ef',
+  6:'#0891b2', 7:'#ca8a04', 8:'#dc2626', 9:'#4f46e5', 10:'#65a30d'
+};
+function createEmptyRuns(){
+  const runs = {};
+  for(let i=1;i<=MAX_RUNS;i++) runs[i] = {name:i+'회차', files:{}, visible:true};
+  return runs;
+}
 const state = {
-  runs: {1:{files:{}, visible:true}, 2:{files:{}, visible:true}, 3:{files:{}, visible:true}},
+  runCount: 2,
+  runs: createEmptyRuns(),
   config: {region:'whole', planMinutes:60},
   activeTab: 'all',
   pinned: null,
   sharedView: false,
 };
+function runIds(){ return Array.from({length:state.runCount},(_,i)=>i+1); }
+function runName(run){ return (state.runs[run] && state.runs[run].name.trim()) || (run+'회차'); }
 
 const tooltip = document.getElementById('tooltip');
 function showTip(x,y,html){ tooltip.innerHTML = html; tooltip.style.left=(x+14)+'px'; tooltip.style.top=(y+14)+'px'; tooltip.style.display='block'; }
@@ -361,7 +387,7 @@ function compactNumber(value){
 }
 function buildSharePayload(){
   const rows = [];
-  [1,2,3].forEach(run=>{
+  runIds().forEach(run=>{
     sortedMinutes(run).forEach(minute=>{
       const file = state.runs[run].files[minute];
       const st = file.stats;
@@ -373,7 +399,10 @@ function buildSharePayload(){
       ]);
     });
   });
-  return {v:1, plan:state.config.planMinutes, tab:state.activeTab, rows};
+  return {
+    v:1, count:state.runCount, names:runIds().map(run=>runName(run)),
+    plan:state.config.planMinutes, tab:state.activeTab, rows
+  };
 }
 async function copyText(text){
   if(navigator.clipboard && window.isSecureContext){
@@ -410,10 +439,15 @@ function loadSharedView(){
   try{
     const payload = decodeSharePayload(location.hash.slice(7));
     if(!payload || payload.v!==1 || !Array.isArray(payload.rows)) return false;
-    state.runs = {1:{files:{},visible:true},2:{files:{},visible:true},3:{files:{},visible:true}};
+    state.runs = createEmptyRuns();
+    const highestRun = payload.rows.reduce((max,row)=>Math.max(max,Number(row[0])||0),0);
+    state.runCount = Math.max(2,Math.min(MAX_RUNS,Number(payload.count)||highestRun||2));
+    if(Array.isArray(payload.names)){
+      runIds().forEach((run,index)=>{ if(payload.names[index]) state.runs[run].name=String(payload.names[index]); });
+    }
     payload.rows.forEach(row=>{
       const [run,minute,filename,samples,pavg,vrms,irms,pf,phase,freqHz] = row;
-      if(!state.runs[run] || !Number.isFinite(Number(minute))) return;
+      if(!state.runs[run] || run>state.runCount || !Number.isFinite(Number(minute))) return;
       state.runs[run].files[minute] = {
         filename, minute, t:{length:samples||0}, ch1:null, ch3:null,
         raw:{n:samples||0}, shared:true,
@@ -421,8 +455,10 @@ function loadSharedView(){
       };
     });
     state.config.planMinutes = Number(payload.plan)||60;
-    state.activeTab = ['all','1','2','3'].includes(String(payload.tab)) ? String(payload.tab) : 'all';
+    const allowedTabs = ['all'].concat(runIds().map(String));
+    state.activeTab = allowedTabs.includes(String(payload.tab)) ? String(payload.tab) : 'all';
     state.sharedView = true;
+    document.getElementById('runCountSelect').value = String(state.runCount);
     document.getElementById('planMinutes').value = state.config.planMinutes;
     document.getElementById('regionMode').disabled = true;
     return true;
@@ -582,7 +618,7 @@ async function handleFiles(runNum, fileList){
       const text = await file.text();
       const {t, ch1, ch3} = parseWaveformCSV(text);
       state.runs[runNum].files[minute] = { filename:file.name, minute, t, ch1, ch3, raw:{n:t.length} };
-      ok++; log.push(`${file.name} · ${runNum}회차 ${minute}분 · ${t.length.toLocaleString()}개 로드 완료`);
+      ok++; log.push(`${file.name} · ${runName(runNum)} ${minute}분 · ${t.length.toLocaleString()}개 로드 완료`);
     }catch(e){
       fail++; log.push(`${file.name} · 오류: ${e.message}`);
     }
@@ -592,7 +628,7 @@ async function handleFiles(runNum, fileList){
 
 function recomputeAll(){
   const mode = state.config.region;
-  for(const runNum of [1,2,3]){
+  for(const runNum of runIds()){
     for(const m in state.runs[runNum].files){
       const f = state.runs[runNum].files[m];
       if(!f.shared) f.stats = computeFileStats(f.t, f.ch1, f.ch3, mode);
@@ -602,7 +638,7 @@ function recomputeAll(){
 
 /* ================= 렌더링 ================= */
 function anyFilesLoaded(){
-  return [1,2,3].some(r => Object.keys(state.runs[r].files).length>0);
+  return runIds().some(r => Object.keys(state.runs[r].files).length>0);
 }
 
 function sortedMinutes(runNum){
@@ -624,7 +660,7 @@ function expectedSlots(runNum){
 }
 
 function visibleRuns(){
-  if(state.activeTab==='all') return [1,2,3].filter(r=>state.runs[r].visible && sortedMinutes(r).length);
+  if(state.activeTab==='all') return runIds().filter(r=>state.runs[r].visible && sortedMinutes(r).length);
   return sortedMinutes(Number(state.activeTab)).length ? [Number(state.activeTab)] : [];
 }
 
@@ -639,17 +675,65 @@ function stddev(arr){
   return Math.sqrt(v);
 }
 
+function renderRunControls(){
+  const grid = document.getElementById('runUploadGrid');
+  grid.innerHTML = '';
+  runIds().forEach(run=>{
+    const item = document.createElement('div');
+    item.className = 'run-upload-item';
+    item.style.setProperty('--run-color',RUN_COLORS[run]);
+    const count = sortedMinutes(run).length;
+    item.innerHTML =
+      '<label>'+run+'번 데이터 이름 · 직접 입력</label>'+
+      '<input class="run-name-input" data-name-run="'+run+'" value="'+escapeHtml(runName(run))+'" maxlength="30">'+
+      '<button class="btn" data-open-run="'+run+'" style="border-color:'+RUN_COLORS[run]+';color:'+RUN_COLORS[run]+'">CSV 파일 열기</button>'+
+      '<div class="run-file-meta">'+(count ? count+'개 파일 불러옴' : '아직 파일 없음')+'</div>'+
+      '<input type="file" id="fileInput'+run+'" multiple accept=".csv">';
+    grid.appendChild(item);
+  });
+
+  grid.querySelectorAll('[data-name-run]').forEach(input=>{
+    input.addEventListener('input',()=>{
+      const run = Number(input.getAttribute('data-name-run'));
+      state.runs[run].name = input.value;
+      renderTabs();
+      if(anyFilesLoaded()){
+        renderStatus();
+        renderSummaryCards();
+        renderTable();
+      }
+    });
+  });
+  grid.querySelectorAll('[data-open-run]').forEach(button=>{
+    button.addEventListener('click',()=>{
+      document.getElementById('fileInput'+button.getAttribute('data-open-run')).click();
+    });
+  });
+  runIds().forEach(run=>{
+    document.getElementById('fileInput'+run).addEventListener('change',async e=>{
+      if(!e.target.files.length) return;
+      await handleFiles(run,e.target.files);
+      recomputeAll();
+      renderRunControls();
+      renderAll();
+    });
+  });
+}
+function escapeHtml(value){
+  return String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function renderStatus(){
   const el = document.getElementById('statusArea');
   if(!anyFilesLoaded()){ el.innerHTML=''; return; }
-  const runsWithData = [1,2,3].filter(r=>sortedMinutes(r).length);
+  const runsWithData = runIds().filter(r=>sortedMinutes(r).length);
   const totalFiles = runsWithData.reduce((s,r)=>s+sortedMinutes(r).length,0);
   const sharedLabel = state.sharedView ? ' · 공유된 결과 보기' : '';
   let html = `<div class="status-line"><span>${runsWithData.length}개 회차 · ${totalFiles}개 파일 · 같은 경과시간에서 회차별 비교${sharedLabel}</span>`;
   html += `<div class="legend-toggle">`;
   runsWithData.forEach(r=>{
     const off = state.runs[r].visible ? '' : 'off';
-    html += `<span class="legend-item ${off}" data-run="${r}"><span class="sw" style="background:${RUN_COLORS[r]}"></span>${r}회차</span>`;
+    html += `<span class="legend-item ${off}" data-run="${r}"><span class="sw" style="background:${RUN_COLORS[r]}"></span>${runName(r)}</span>`;
   });
   html += `</div></div>`;
 
@@ -657,7 +741,7 @@ function renderStatus(){
   runsWithData.forEach(r=>{
     sortedMinutes(r).forEach(m=>{
       const f = state.runs[r].files[m];
-      html += `${f.filename} · <b>${r}회차 ${m}분</b> · ${f.t.length.toLocaleString()}개 계산 완료<br>`;
+      html += `${f.filename} · <b>${runName(Number(r))} ${m}분</b> · ${f.t.length.toLocaleString()}개 계산 완료<br>`;
     });
   });
   html += `</div></details>`;
@@ -674,7 +758,7 @@ function renderStatus(){
 
 function renderSummaryCards(){
   const grid = document.getElementById('summaryGrid');
-  const runs = state.activeTab==='all' ? [1,2,3].filter(r=>sortedMinutes(r).length) : visibleRuns();
+  const runs = state.activeTab==='all' ? runIds().filter(r=>sortedMinutes(r).length) : visibleRuns();
   grid.innerHTML = '';
   runs.forEach(r=>{
     const mins = sortedMinutes(r);
@@ -691,7 +775,7 @@ function renderSummaryCards(){
     card.className = 'card summary-card';
     card.style.setProperty('--run-color', RUN_COLORS[r]);
     card.innerHTML = `
-      <div class="label"><span>${r}회차 · ${mins.length}개</span></div>
+      <div class="label"><span>${runName(r)} · ${mins.length}개</span></div>
       <div class="value num">${fmt(avg,2)} W</div>
       <div class="delta num">
         <span class="${firstLast<0?'neg':'pos'}">처음→마지막 ${fmtPct(firstLast,2)}</span>
@@ -787,7 +871,7 @@ function renderLineChart(svgEl, key, unit, decimals, scale, opts){
   svgEl.querySelectorAll('circle.dot').forEach(dot=>{
     dot.addEventListener('mouseenter', e=>{
       const r = dot.getAttribute('data-run'), m = dot.getAttribute('data-m'), v = Number(dot.getAttribute('data-v'));
-      showTip(e.clientX, e.clientY, `<div class="row"><span class="sw" style="background:${RUN_COLORS[r]}"></span><b>${r}회차 ${m}분</b></div><div>${v.toFixed(decimals)} ${unit}</div>`);
+      showTip(e.clientX, e.clientY, `<div class="row"><span class="sw" style="background:${RUN_COLORS[r]}"></span><b>${runName(Number(r))} ${m}분</b></div><div>${v.toFixed(decimals)} ${unit}</div>`);
     });
     dot.addEventListener('mousemove', e=>{ tooltip.style.left=(e.clientX+14)+'px'; tooltip.style.top=(e.clientY+14)+'px'; });
     dot.addEventListener('mouseleave', hideTip);
@@ -800,7 +884,7 @@ function renderLineChart(svgEl, key, unit, decimals, scale, opts){
       label.setAttribute('x', dot.getAttribute('cx'));
       label.setAttribute('y', Number(dot.getAttribute('cy'))-8);
       label.setAttribute('text-anchor','middle');
-      label.textContent = `${r}회차 ${m}분 · ${v.toFixed(decimals)}${unit}`;
+      label.textContent = `${runName(Number(r))} ${m}분 · ${v.toFixed(decimals)}${unit}`;
       svgEl.appendChild(label);
       e.stopPropagation();
     });
@@ -832,7 +916,7 @@ function renderMiniGrid(){
 }
 
 function renderTable(){
-  const runs = state.activeTab==='all' ? [1,2,3] : [Number(state.activeTab)];
+  const runs = state.activeTab==='all' ? runIds() : [Number(state.activeTab)];
   const rows = [];
   runs.forEach(r=>{
     const mins = sortedMinutes(r);
@@ -853,7 +937,7 @@ function renderTable(){
   rows.forEach(row=>{
     tbody += `<tr>
       <td>${row.filename}</td>
-      <td><span class="run-chip"><span class="dot" style="background:${RUN_COLORS[row.run]}"></span>${row.run}회차</span></td>
+      <td><span class="run-chip"><span class="dot" style="background:${RUN_COLORS[row.run]}"></span>${runName(row.run)}</span></td>
       <td class="num">${fmt(row.s.pavg,2)}</td>
       <td class="num">${fmt(row.s.vrms,2)}</td>
       <td class="num">${fmt(row.s.irms,3)}</td>
@@ -870,8 +954,12 @@ function renderTable(){
 }
 
 function renderTabs(){
-  document.querySelectorAll('#tabBar button').forEach(b=>{
-    b.classList.toggle('active', b.getAttribute('data-tab')===state.activeTab);
+  const bar = document.getElementById('tabBar');
+  let html = '<button data-tab="all">전체 비교</button>';
+  runIds().forEach(run=>{ html += '<button data-tab="'+run+'">'+escapeHtml(runName(run))+'</button>'; });
+  bar.innerHTML = html;
+  bar.querySelectorAll('button').forEach(b=>{
+    b.classList.toggle('active',b.getAttribute('data-tab')===state.activeTab);
   });
 }
 
@@ -889,27 +977,20 @@ function renderAll(){
 }
 
 /* ================= 이벤트 배선 ================= */
-document.getElementById('openRun1').addEventListener('click', ()=>document.getElementById('fileInput1').click());
-document.getElementById('openRun2').addEventListener('click', ()=>document.getElementById('fileInput2').click());
-document.getElementById('openRun3').addEventListener('click', ()=>document.getElementById('fileInput3').click());
-
-[1,2,3].forEach(r=>{
-  document.getElementById('fileInput'+r).addEventListener('change', async (e)=>{
-    if(!e.target.files.length) return;
-    await handleFiles(r, e.target.files);
-    recomputeAll();
-    renderAll();
-    e.target.value = '';
-  });
+document.getElementById('runCountSelect').addEventListener('change',e=>{
+  state.runCount = Math.max(2,Math.min(MAX_RUNS,Number(e.target.value)||2));
+  if(state.activeTab!=='all' && Number(state.activeTab)>state.runCount) state.activeTab='all';
+  renderRunControls();
+  renderAll();
 });
 
-document.getElementById('resetBtn').addEventListener('click', ()=>{
-  state.runs = {1:{files:{}, visible:true}, 2:{files:{}, visible:true}, 3:{files:{}, visible:true}};
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  state.runs = createEmptyRuns();
   state.activeTab = 'all';
   state.sharedView = false;
   document.getElementById('regionMode').disabled = false;
   if(location.hash.startsWith('#share=')) history.replaceState(null,'',location.pathname+location.search);
-  renderTabs();
+  renderRunControls();
   renderAll();
 });
 
@@ -1025,6 +1106,8 @@ document.getElementById('planMinutes').addEventListener('input', (e)=>{
 });
 
 loadSharedView();
+document.getElementById('runCountSelect').value = String(state.runCount);
+renderRunControls();
 renderAll();
 </script>
 

@@ -240,7 +240,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
     <div class="titles">
       <span class="eyebrow">Waveform Lab · Run Monitor</span>
       <h1>전력 모니터링</h1>
-      <p class="sub">비교할 데이터 수와 이름을 정한 뒤 오실로스코프 CSV를 불러옵니다. <span class="num">1-5.csv</span>와 <span class="num">tek0000ALL.csv</span> 형식을 인식합니다.</p>
+      <p class="sub">비교할 데이터 수와 이름을 정한 뒤 오실로스코프 CSV를 불러옵니다. <span class="num">1-5.csv</span>와 <span class="num">tek00000ALL.csv</span> 형식을 인식합니다.</p>
     </div>
     <div class="toolbar">
       <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
@@ -276,7 +276,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
     </div>
     <div class="field">
       <label for="tekIntervalMinutes">Tek 파일 간격 (분)</label>
-      <input type="number" id="tekIntervalMinutes" value="5" min="1" step="1" title="tek0000ALL.csv는 첫 저장 시점, tek0001ALL.csv는 두 번째 저장 시점">
+      <input type="number" id="tekIntervalMinutes" value="5" min="1" step="1" title="tek00000ALL.csv는 첫 저장 시점, tek00001ALL.csv는 두 번째 저장 시점">
     </div>
     <div class="field">
       <label>계산 구간</label>
@@ -296,7 +296,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
   <div class="tabs" id="tabBar"></div>
 
   <div class="region-explain">
-    <div><b>파일 순서</b> — tek0000ALL.csv → 5분, tek0001ALL.csv → 10분처럼 번호 순서대로 배치합니다. 실제 저장 간격이 다르면 위의 간격을 바꿔주세요.</div>
+    <div><b>파일 순서</b> — tek00000ALL.csv → 5분, tek00001ALL.csv → 10분처럼 번호 순서대로 배치합니다. 실제 저장 간격이 다르면 위의 간격을 바꿔주세요.</div>
     <div><b>데이터 이름</b> — 각 입력칸에 ‘1회차’, ‘설비 A’, ‘조건 350V’처럼 원하는 이름을 직접 입력할 수 있습니다.</div>
     <div><b>전체 기록</b> — 파일에 저장된 파형 데이터(약 10,000개 포인트) 전체를 그대로 사용해 계산합니다.</div>
     <div><b>완전한 주기</b> — 추정 주파수를 기준으로 정수 개 사이클만 계산해 값을 안정화합니다.</div>

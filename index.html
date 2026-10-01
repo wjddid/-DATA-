@@ -240,7 +240,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
     <div class="titles">
       <span class="eyebrow">Waveform Lab · Run Monitor</span>
       <h1>전력 모니터링</h1>
-      <p class="sub">비교할 데이터 수와 이름을 직접 정한 뒤, 각 데이터의 오실로스코프 CSV를 불러옵니다. 파일명 끝의 <span class="num">-경과분.csv</span> 형식(예: 시험A-5.csv)을 인식합니다.</p>
+      <p class="sub">비교할 데이터 수와 이름을 정한 뒤 오실로스코프 CSV를 불러옵니다. <span class="num">1-5.csv</span>와 <span class="num">tek0000ALL.csv</span> 형식을 인식합니다.</p>
     </div>
     <div class="toolbar">
       <button class="btn ghost" id="resetBtn">RESET (초기화)</button>
@@ -275,6 +275,10 @@ body.pdf-exporting .wrap{ max-width:100%; }
       </select>
     </div>
     <div class="field">
+      <label for="tekIntervalMinutes">Tek 파일 간격 (분)</label>
+      <input type="number" id="tekIntervalMinutes" value="5" min="1" step="1" title="tek0000ALL.csv는 첫 저장 시점, tek0001ALL.csv는 두 번째 저장 시점">
+    </div>
+    <div class="field">
       <label>계산 구간</label>
       <select id="regionMode">
         <option value="whole">완전한 주기</option>
@@ -292,6 +296,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
   <div class="tabs" id="tabBar"></div>
 
   <div class="region-explain">
+    <div><b>파일 순서</b> — tek0000ALL.csv → 5분, tek0001ALL.csv → 10분처럼 번호 순서대로 배치합니다. 실제 저장 간격이 다르면 위의 간격을 바꿔주세요.</div>
     <div><b>데이터 이름</b> — 각 입력칸에 ‘1회차’, ‘설비 A’, ‘조건 350V’처럼 원하는 이름을 직접 입력할 수 있습니다.</div>
     <div><b>전체 기록</b> — 파일에 저장된 파형 데이터(약 10,000개 포인트) 전체를 그대로 사용해 계산합니다.</div>
     <div><b>완전한 주기</b> — 추정 주파수를 기준으로 정수 개 사이클만 계산해 값을 안정화합니다.</div>
@@ -346,7 +351,7 @@ function createEmptyRuns(){
 const state = {
   runCount: 2,
   runs: createEmptyRuns(),
-  config: {region:'whole', planMinutes:60},
+  config: {region:'whole', planMinutes:60, tekIntervalMinutes:5},
   activeTab: 'all',
   pinned: null,
   sharedView: false,
@@ -438,7 +443,7 @@ function buildSharePayload(){
   });
   return {
     v:1, count:state.runCount, names:runIds().map(run=>runName(run)),
-    plan:state.config.planMinutes, tab:state.activeTab, rows
+    plan:state.config.planMinutes, tekInterval:state.config.tekIntervalMinutes, tab:state.activeTab, rows
   };
 }
 async function copyText(text){
@@ -547,6 +552,8 @@ function loadSharedView(){
       };
     });
     state.config.planMinutes = Number(payload.plan)||60;
+    state.config.tekIntervalMinutes = Number(payload.tekInterval)||5;
+    document.getElementById('tekIntervalMinutes').value = String(state.config.tekIntervalMinutes);
     const allowedTabs = ['all'].concat(runIds().map(String));
     state.activeTab = allowedTabs.includes(String(payload.tab)) ? String(payload.tab) : 'all';
     state.sharedView = true;
@@ -691,20 +698,46 @@ function computeFileStats(t, ch1, ch3, regionMode){
 }
 
 /* ================= 파일 로드 ================= */
-function parseMinuteFromFilename(name){
+function parseMinuteFromFilename(name, tekInterval=state.config.tekIntervalMinutes){
+  const tek = name.match(/^tek(\d+)ALL\.csv$/i);
+  if(tek){
+    const order = Number(tek[1]);
+    const interval = Number(tekInterval);
+    return Number.isSafeInteger(order) && Number.isFinite(interval) && interval>0
+      ? (order+1)*interval : null;
+  }
   const m = name.match(/(\d+)\s*-\s*(\d+)\D*\.csv$/i) || name.match(/-(\d+)\.csv$/i);
   if(!m) return null;
   return parseInt(m[m.length-1], 10);
 }
+function remapTekFiles(){
+  for(const runNum of runIds()){
+    const files = Object.values(state.runs[runNum].files);
+    const next = {};
+    files.filter(file=>!/^tek\d+ALL\.csv$/i.test(file.filename)).forEach(file=>{
+      next[file.minute]=file;
+    });
+    files.filter(file=>/^tek\d+ALL\.csv$/i.test(file.filename)).forEach(file=>{
+      const minute = parseMinuteFromFilename(file.filename);
+      if(minute===null) return;
+      file.minute=minute;
+      next[minute]=file;
+    });
+    state.runs[runNum].files=next;
+  }
+}
 
 async function handleFiles(runNum, fileList){
-  const files = Array.from(fileList);
+  const files = Array.from(fileList).sort((a,b)=>{
+    const am=parseMinuteFromFilename(a.name), bm=parseMinuteFromFilename(b.name);
+    return (am===null?Infinity:am)-(bm===null?Infinity:bm) || a.name.localeCompare(b.name);
+  });
   let ok=0, fail=0;
   const log = [];
   for(const file of files){
     const minute = parseMinuteFromFilename(file.name);
     if(minute===null){
-      fail++; log.push(`${file.name} · 파일명에서 경과분을 못 읽음 (건너뜀)`); continue;
+      fail++; log.push(`${file.name} · 경과분 또는 Tek 번호를 읽을 수 없음 (건너뜀)`); continue;
     }
     try{
       const text = await file.text();
@@ -1210,6 +1243,17 @@ document.getElementById('tabBar').addEventListener('click', (e)=>{
 document.getElementById('regionMode').addEventListener('change', (e)=>{
   state.config.region = e.target.value;
   recomputeAll();
+  renderAll();
+});
+document.getElementById('tekIntervalMinutes').addEventListener('change',e=>{
+  const interval = Number(e.target.value);
+  if(!Number.isFinite(interval) || interval<=0){
+    e.target.value=String(state.config.tekIntervalMinutes);
+    return;
+  }
+  state.config.tekIntervalMinutes=interval;
+  remapTekFiles();
+  renderRunControls();
   renderAll();
 });
 document.getElementById('planMinutes').addEventListener('input', (e)=>{

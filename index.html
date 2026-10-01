@@ -968,8 +968,8 @@ function renderAll(){
   document.getElementById('emptyState').style.display = loaded ? 'none' : 'flex';
   document.getElementById('mainContent').style.display = loaded ? 'flex' : 'none';
   renderStatus();
-  if(!loaded) return;
   renderTabs();
+  if(!loaded) return;
   renderSummaryCards();
   renderMainChart();
   renderMiniGrid();

@@ -55,7 +55,7 @@ header.page .sub{ margin:0; color:var(--text-2); font-size:0.86rem; }
 .card{ background:var(--surface); border:1px solid var(--border-strong); border-radius:12px; box-shadow:var(--shadow); }
 
 /* tabs */
-.tabs{ display:flex; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:4px; width:fit-content; }
+.tabs{ display:flex; flex-wrap:wrap; max-width:100%; gap:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:4px; width:fit-content; }
 .tabs button{ appearance:none; border:none; background:transparent; color:var(--text-2); font:inherit; font-size:0.82rem; font-weight:500; padding:7px 14px; border-radius:7px; cursor:pointer; }
 .tabs button.active{ background:var(--surface); color:var(--text); box-shadow:var(--shadow); }
 
@@ -263,7 +263,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
   <div id="statusArea"></div>
 
   <div id="emptyState" class="card empty-state">
-    <div><b>아직 불러온 파일이 없습니다.</b><br>위의 [1회차 파일 열기] 버튼부터 눌러서 CSV를 선택해주세요 (여러 개 한번에 선택 가능).</div>
+    <div><b>아직 불러온 파일이 없습니다.</b><br>위에서 비교할 데이터 수와 이름을 정한 뒤 각 [CSV 파일 열기] 버튼을 눌러주세요 (여러 개 한번에 선택 가능).</div>
   </div>
 
   <div id="mainContent" style="display:none; flex-direction:column; gap:20px;">
@@ -281,7 +281,7 @@ body.pdf-exporting .wrap{ max-width:100%; }
       <table id="dataTable"></table>
     </div>
     <div class="table-caption">
-      <span>처음 대비 / 직전 대비는 같은 회차 안에서의 변화율(%)입니다.</span>
+      <span>처음 대비 / 직전 대비는 같은 데이터 안에서의 변화율(%)입니다.</span>
       <span id="tableCount"></span>
     </div>
   </div>
@@ -729,7 +729,7 @@ function renderStatus(){
   const runsWithData = runIds().filter(r=>sortedMinutes(r).length);
   const totalFiles = runsWithData.reduce((s,r)=>s+sortedMinutes(r).length,0);
   const sharedLabel = state.sharedView ? ' · 공유된 결과 보기' : '';
-  let html = `<div class="status-line"><span>${runsWithData.length}개 회차 · ${totalFiles}개 파일 · 같은 경과시간에서 회차별 비교${sharedLabel}</span>`;
+  let html = `<div class="status-line"><span>${runsWithData.length}개 데이터 · ${totalFiles}개 파일 · 같은 경과시간끼리 비교${sharedLabel}</span>`;
   html += `<div class="legend-toggle">`;
   runsWithData.forEach(r=>{
     const off = state.runs[r].visible ? '' : 'off';
@@ -931,7 +931,7 @@ function renderTable(){
     });
   });
 
-  const cols = ['파일 / 분','회차','P (W)','Vrms (V)','Irms (A)','역률(PF)','위상 (°)','주파수 (kHz)','처음 대비','직전 대비'];
+  const cols = ['파일 / 분','데이터','P (W)','Vrms (V)','Irms (A)','역률(PF)','위상 (°)','주파수 (kHz)','처음 대비','직전 대비'];
   let thead = '<thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead>';
   let tbody = '<tbody>';
   rows.forEach(row=>{
@@ -1018,7 +1018,7 @@ async function exportPDF(){
     graphPage.className = 'pdf-sheet pdf-graph-sheet';
     graphPage.innerHTML =
       '<div class="pdf-sheet-title"><h2>전력 모니터링 · 그래프</h2>'+
-      '<p>회차별 전력 안정성 및 전기적 특성 변화</p></div>';
+      '<p>데이터별 전력 안정성 및 전기적 특성 변화</p></div>';
 
     const statusLine = document.querySelector('#statusArea .status-line');
     if(statusLine) graphPage.appendChild(statusLine.cloneNode(true));

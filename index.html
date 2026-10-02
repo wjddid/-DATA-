@@ -141,6 +141,13 @@ tbody tr:hover td{ background:color-mix(in srgb, var(--run1) 10%, transparent); 
 .share-popover-head{ padding:14px 16px; border-bottom:1px solid var(--border); }
 .share-popover-head b{ display:block; font-size:.95rem; }
 .share-popover-head small{ display:block; margin-top:3px; color:var(--muted); }
+.share-import{ padding:12px 16px; border-bottom:1px solid var(--border); }
+.share-import label{ display:block; margin-bottom:7px; font-size:.78rem; font-weight:700; }
+.share-import-row{ display:flex; gap:8px; }
+.share-import-row input{ flex:1; min-width:0; padding:9px 10px; color:var(--text); background:var(--surface); border:1px solid var(--border-strong); border-radius:8px; font:inherit; font-size:.8rem; }
+.share-import-row .btn{ white-space:nowrap; }
+.share-import-message{ min-height:1.2em; margin-top:6px; font-size:.72rem; color:var(--muted); }
+.share-import-message.error{ color:var(--crit); }
 .share-list{ overflow:auto; padding:8px 16px; }
 .share-list-empty{ padding:38px 10px; text-align:center; color:var(--muted); }
 .share-list-item{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 14px; align-items:center; padding:12px 0; border-bottom:1px solid var(--border); }
@@ -158,6 +165,7 @@ tbody tr:hover td{ background:color-mix(in srgb, var(--run1) 10%, transparent); 
 @media(max-width:560px){
   .share-list-item{ grid-template-columns:1fr; }
   .share-list-actions{ justify-content:flex-start; }
+  .share-import-row{ flex-direction:column; }
 }
 
 .empty-state{ display:flex; flex-direction:column; align-items:center; gap:10px; padding:50px 20px; color:var(--muted); text-align:center; font-size:0.9rem; }
@@ -250,8 +258,16 @@ body.pdf-exporting .wrap{ max-width:100%; }
         <summary class="btn">공유 목록 <span id="shareListCount">0</span></summary>
         <div class="share-popover">
           <div class="share-popover-head">
-            <div><b>공유 링크 목록</b><small>이 브라우저에서 만든 링크 · 최신순</small></div>
+            <div><b>공유 링크 목록</b><small>내가 만들거나 받은 링크 · 이 브라우저에 저장</small></div>
           </div>
+          <form class="share-import" id="shareImportForm">
+            <label for="shareImportInput">팀원에게 받은 링크 추가</label>
+            <div class="share-import-row">
+              <input id="shareImportInput" type="url" placeholder="https://wjddid.github.io/-DATA-/#share=..." autocomplete="off" required>
+              <button class="btn" type="submit">목록에 추가</button>
+            </div>
+            <div class="share-import-message" id="shareImportMessage" role="status"></div>
+          </form>
           <div class="share-list" id="shareListBody"></div>
           <p class="share-list-note">삭제하면 이 브라우저의 목록에서만 없어집니다. 이미 전달한 링크는 계속 열립니다.</p>
         </div>
@@ -477,13 +493,42 @@ function buildShareTitle(){
   const fileCount = runIds().reduce((sum,run)=>sum+sortedMinutes(run).length,0);
   return (names.join(' · ')||'전력 모니터링')+' · '+fileCount+'개 파일';
 }
-function rememberShareLink(url){
-  const now = new Date().toISOString();
-  const item = {id:String(Date.now())+'-'+Math.random().toString(36).slice(2,7),title:buildShareTitle(),url,createdAt:now};
-  const items = getShareHistory().filter(existing=>existing.url!==url);
+function shareTitleFromPayload(payload){
+  const runs = [...new Set(payload.rows.map(row=>Number(row[0])))].filter(run=>run>=1 && run<=MAX_RUNS).sort((a,b)=>a-b);
+  const names = runs.map(run=>String(Array.isArray(payload.names) && payload.names[run-1] || run+'회차').slice(0,30));
+  return (names.join(' · ')||'전력 모니터링')+' · '+payload.rows.length+'개 파일';
+}
+function rememberShareLink(url,payload){
+  const items = getShareHistory();
+  if(items.some(existing=>existing.url===url)) return false;
+  const item = {
+    id:String(Date.now())+'-'+Math.random().toString(36).slice(2,7),
+    title:payload ? shareTitleFromPayload(payload) : buildShareTitle(),
+    url,createdAt:new Date().toISOString()
+  };
   items.unshift(item);
   setShareHistory(items);
   renderShareList();
+  return true;
+}
+function validSharePayload(payload){
+  return payload && payload.v===1 && Array.isArray(payload.rows) &&
+    payload.rows.length>0 && payload.rows.length<=500 &&
+    payload.rows.every(row=>Array.isArray(row) && row.length>=10 &&
+      Number.isInteger(Number(row[0])) && Number(row[0])>=1 && Number(row[0])<=MAX_RUNS &&
+      Number.isFinite(Number(row[1])) && Number(row[1])>=0 &&
+      typeof row[2]==='string' && row[2].length<=255 &&
+      Number.isFinite(Number(row[3])) && Number(row[3])>=0 &&
+      row.slice(4,10).every(value=>value===null || (typeof value==='number' && Number.isFinite(value))));
+}
+function parseSharedLink(input){
+  const url = new URL(input.trim());
+  const samePage = url.origin===location.origin &&
+    url.pathname.replace(/\/+$/,'')===location.pathname.replace(/\/+$/,'');
+  if(!samePage || !url.hash.startsWith('#share=') || url.hash.length>500000) throw new Error('이 페이지에서 만든 공유 링크를 입력해 주세요.');
+  const payload = decodeSharePayload(url.hash.slice(7));
+  if(!validSharePayload(payload)) throw new Error('공유 링크의 데이터 형식이 올바르지 않습니다.');
+  return {url:url.origin+url.pathname+url.hash,payload};
 }
 function updateShareListCount(){
   const count = getShareHistory().length;
@@ -499,7 +544,7 @@ function renderShareList(){
   const items = getShareHistory();
   updateShareListCount();
   if(!items.length){
-    body.innerHTML = '<div class="share-list-empty">아직 만든 공유 링크가 없습니다.</div>';
+    body.innerHTML = '<div class="share-list-empty">아직 저장된 공유 링크가 없습니다. 팀원이 보낸 링크를 붙여 넣거나 열어보세요.</div>';
     return;
   }
   body.innerHTML = items.map(item=>
@@ -535,12 +580,12 @@ function loadSharedView(){
   if(!location.hash.startsWith('#share=')) return false;
   try{
     const payload = decodeSharePayload(location.hash.slice(7));
-    if(!payload || payload.v!==1 || !Array.isArray(payload.rows)) return false;
+    if(!validSharePayload(payload)) return false;
     state.runs = createEmptyRuns();
     const highestRun = payload.rows.reduce((max,row)=>Math.max(max,Number(row[0])||0),0);
     state.runCount = Math.max(2,Math.min(MAX_RUNS,Number(payload.count)||highestRun||2));
     if(Array.isArray(payload.names)){
-      runIds().forEach((run,index)=>{ if(payload.names[index]) state.runs[run].name=String(payload.names[index]); });
+      runIds().forEach((run,index)=>{ if(payload.names[index]) state.runs[run].name=String(payload.names[index]).slice(0,30); });
     }
     payload.rows.forEach(row=>{
       const [run,minute,filename,samples,pavg,vrms,irms,pf,phase,freqHz] = row;
@@ -560,6 +605,7 @@ function loadSharedView(){
     document.getElementById('runCountSelect').value = String(state.runCount);
     document.getElementById('planMinutes').value = state.config.planMinutes;
     document.getElementById('regionMode').disabled = true;
+    rememberShareLink(location.origin+location.pathname+location.hash,payload);
     return true;
   }catch(err){
     console.error('Shared view load failed',err);
@@ -858,7 +904,7 @@ function renderStatus(){
   html += `<div class="legend-toggle">`;
   runsWithData.forEach(r=>{
     const off = state.runs[r].visible ? '' : 'off';
-    html += `<span class="legend-item ${off}" data-run="${r}"><span class="sw" style="background:${RUN_COLORS[r]}"></span>${runName(r)}</span>`;
+    html += `<span class="legend-item ${off}" data-run="${r}"><span class="sw" style="background:${RUN_COLORS[r]}"></span>${escapeHtml(runName(r))}</span>`;
   });
   html += `</div></div>`;
 
@@ -866,7 +912,7 @@ function renderStatus(){
   runsWithData.forEach(r=>{
     sortedMinutes(r).forEach(m=>{
       const f = state.runs[r].files[m];
-      html += `${f.filename} · <b>${runName(Number(r))} ${m}분</b> · ${f.t.length.toLocaleString()}개 계산 완료<br>`;
+      html += `${escapeHtml(f.filename)} · <b>${escapeHtml(runName(Number(r)))} ${m}분</b> · ${f.t.length.toLocaleString()}개 계산 완료<br>`;
     });
   });
   html += `</div></details>`;
@@ -900,15 +946,15 @@ function renderSummaryCards(){
     card.className = 'card summary-card';
     card.style.setProperty('--run-color', RUN_COLORS[r]);
     card.innerHTML = `
-      <div class="label"><span>${runName(r)} · ${mins.length}개</span></div>
+      <div class="label"><span>${escapeHtml(runName(r))} · ${mins.length}개</span></div>
       <div class="value num">${fmt(avg,2)} W</div>
       <div class="delta num">
         <span class="${firstLast<0?'neg':'pos'}">처음→마지막 ${fmtPct(firstLast,2)}</span>
         <span title="변동계수(Coefficient of Variation) · 표준편차÷평균 — 전체적으로 얼마나 들쭉날쭉한지">CV(변동계수) ${fmt(cv,2)}%</span>
       </div>
       <div class="minmax num">
-        <span>최소 ${fmt(powers[minIdx],2)} W <span class="mm-file">(${minFile})</span></span>
-        <span>최대 ${fmt(powers[maxIdx],2)} W <span class="mm-file">(${maxFile})</span></span>
+        <span>최소 ${fmt(powers[minIdx],2)} W <span class="mm-file">(${escapeHtml(minFile)})</span></span>
+        <span>최대 ${fmt(powers[maxIdx],2)} W <span class="mm-file">(${escapeHtml(maxFile)})</span></span>
         <span title="(최대-최소)÷평균 — 가장 튄 두 지점 사이의 간격">최대-최소 차이 ${fmt(rangePct,2)}%</span>
       </div>`;
     grid.appendChild(card);
@@ -1007,7 +1053,7 @@ function renderLineChart(svgEl, key, unit, decimals, scale, opts){
   svgEl.querySelectorAll('circle.dot').forEach(dot=>{
     dot.addEventListener('mouseenter', e=>{
       const r = dot.getAttribute('data-run'), m = dot.getAttribute('data-m'), v = Number(dot.getAttribute('data-v'));
-      showTip(e.clientX, e.clientY, `<div class="row"><span class="sw" style="background:${RUN_COLORS[r]}"></span><b>${runName(Number(r))} ${m}분</b></div><div>${v.toFixed(decimals)} ${unit}</div>`);
+      showTip(e.clientX, e.clientY, `<div class="row"><span class="sw" style="background:${RUN_COLORS[r]}"></span><b>${escapeHtml(runName(Number(r)))} ${m}분</b></div><div>${v.toFixed(decimals)} ${unit}</div>`);
     });
     dot.addEventListener('mousemove', e=>{ tooltip.style.left=(e.clientX+14)+'px'; tooltip.style.top=(e.clientY+14)+'px'; });
     dot.addEventListener('mouseleave', hideTip);
@@ -1072,8 +1118,8 @@ function renderTable(){
   let tbody = '<tbody>';
   rows.forEach(row=>{
     tbody += `<tr>
-      <td>${row.filename}</td>
-      <td><span class="run-chip"><span class="dot" style="background:${RUN_COLORS[row.run]}"></span>${runName(row.run)}</span></td>
+      <td>${escapeHtml(row.filename)}</td>
+      <td><span class="run-chip"><span class="dot" style="background:${RUN_COLORS[row.run]}"></span>${escapeHtml(runName(row.run))}</span></td>
       <td class="num">${fmt(row.s.pavg,2)}</td>
       <td class="num">${fmt(row.s.vrms,2)}</td>
       <td class="num">${fmt(row.s.irms,3)}</td>
@@ -1224,6 +1270,21 @@ async function exportPDF(){
 document.getElementById('pdfBtn').addEventListener('click', exportPDF);
 document.getElementById('shareBtn').addEventListener('click', shareCurrentView);
 document.getElementById('shareMenu').addEventListener('toggle',e=>{ if(e.currentTarget.open) renderShareList(); });
+document.getElementById('shareImportForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const input = document.getElementById('shareImportInput');
+  const message = document.getElementById('shareImportMessage');
+  try{
+    const shared = parseSharedLink(input.value);
+    const added = rememberShareLink(shared.url,shared.payload);
+    message.classList.remove('error');
+    message.textContent = added ? '목록에 추가했습니다. 아래에서 열기를 누르세요.' : '이미 목록에 있는 링크입니다.';
+    if(added) input.value = '';
+  }catch(err){
+    message.classList.add('error');
+    message.textContent = err.message || '공유 링크를 확인해 주세요.';
+  }
+});
 document.getElementById('shareListBody').addEventListener('click',async e=>{
   const copyButton = e.target.closest('[data-copy-share]');
   const openButton = e.target.closest('[data-open-share]');
